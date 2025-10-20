@@ -4,6 +4,8 @@ import json
 import threading
 import string
 import random
+import time # time module added for clarity, although not strictly needed for this logic
+
 # Flask server code is completely removed, using Polling only.
 
 # --- CONFIGURATION SETTINGS ---
@@ -14,15 +16,21 @@ BOT_USERNAME = 'One_piece_is_real_bot' # Your Bot Username
 DATABASE_FILE = 'database.json' # Database file name
 SHORT_ID_LENGTH = 6 # Payload length, e.g., 'oev4Di'
 
-# Required Channel Subscriptions (ID and Invite Link)
-# 🚨 URL FIX: Channel 2 link has been corrected by adding 'https://t.me/'
+# Required Channel Subscriptions (ID and Invite Link) - Corrected URLs
 REQUIRED_CHANNELS = [
     {"name": "Channel 1 (Anime Content)", "id": -1003144969778, "invite_link": "https://t.me/onepieceisreal144"},
-    # 💥 यहाँ 'https://t.me/' जोड़ा गया है 💥
     {"name": "Channel 2 (Anime Content)", "id": -1003104977687, "invite_link": "https://t.me/onepieceisreal155"},
     {"name": "Channel 3 (Anime Content)", "id": -1002965575141, "invite_link": "https://t.me/entertaining166"},
     {"name": "Channel 4 (Anime Content)", "id": -1003069758570, "invite_link": "https://t.me/anime14400"} 
 ]
+
+# --- TEMPORARY FILE SETTINGS ---
+DELETION_TIME_SECONDS = 30 * 60  # 30 minutes in seconds
+
+# Professional English Messages as requested
+DELETION_NOTICE = "🗑️ **This message has been automatically deleted.** The file's temporary viewing period has expired."
+WARNING_MESSAGE = "🚨 **Important Notice:** This file is temporary and will be automatically deleted from this chat in **30 minutes**. Please forward/save the content immediately to your Saved Messages or another secure location."
+
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -93,6 +101,35 @@ def create_deep_link_and_send(chat_id, file_id, caption):
         bot.send_message(chat_id, "❌ **Error:** Failed to generate Deep Link. Please check the console.")
 
 
+# --- DELETION LOGIC (NEW) ---
+
+def schedule_deletion(chat_id, file_message_id, warning_message_id):
+    """
+    Deletes the warning message and edits the file message after the timer expires.
+    This function runs in a separate thread.
+    """
+    try:
+        # 1. Delete the warning message
+        bot.delete_message(chat_id, warning_message_id)
+        print(f"Deleted warning message {warning_message_id} in chat {chat_id}")
+    except Exception as e:
+        # This can fail if the user manually deletes the warning message, which is fine.
+        print(f"Warning message {warning_message_id} already deleted or error during deletion: {e}")
+
+    try:
+        # 2. Edit the file message with the deletion notice
+        bot.edit_message_text(
+            DELETION_NOTICE, 
+            chat_id, 
+            file_message_id, 
+            parse_mode='Markdown'
+        )
+        print(f"Edited file message {file_message_id} in chat {chat_id} to deletion notice.")
+    except Exception as e:
+        # This can fail if the user manually deletes the file message, which is fine.
+        print(f"File message {file_message_id} already deleted or error during editing: {e}")
+
+
 # --- OTHER UTILITY FUNCTIONS ---
 
 def get_unsubscribed_channels(user_id):
@@ -110,7 +147,8 @@ def get_unsubscribed_channels(user_id):
 
 def send_final_content(chat_id, short_id):
     """
-    Retrieves the File ID and caption from the database and sends the file.
+    Retrieves the File ID and caption from the database, sends the file, 
+    sends the warning, and schedules the deletion.
     """
     try:
         db = load_database()
@@ -129,15 +167,33 @@ def send_final_content(chat_id, short_id):
         # Markdown parser handles the clickable usernames (@).
         formatted_caption = f"*{caption}*"
 
+        # 1. Send success message (optional, but good practice)
         bot.send_message(chat_id, "✅ **Verification Successful!** Your requested file is here:")
-        
-        # Send file with the formatted caption and Markdown parse mode
-        bot.send_document(
+
+        # 2. Send the file (Document)
+        sent_file_msg = bot.send_document(
             chat_id, 
             file_id, 
             caption=formatted_caption, 
             parse_mode='Markdown'
         )
+        file_message_id = sent_file_msg.message_id
+        
+        # 3. Send the Warning Message (NEW)
+        sent_warning_msg = bot.send_message(
+            chat_id, 
+            WARNING_MESSAGE, 
+            parse_mode='Markdown'
+        )
+        warning_message_id = sent_warning_msg.message_id
+        
+        # 4. Schedule deletion after 30 minutes (1800 seconds) (NEW)
+        timer = threading.Timer(
+            DELETION_TIME_SECONDS, 
+            schedule_deletion, 
+            args=[chat_id, file_message_id, warning_message_id]
+        )
+        timer.start()
             
     except Exception as e:
         print(f"Error sending content or invalid link: {e}")
@@ -168,7 +224,7 @@ def handle_start(message):
             "**Thank you for choosing us!** Enjoy the content! ✨"
         )
         
-        # Generate 4 channel buttons (Fixes the issue where the bot did not reply due to invalid URL in the button)
+        # Generate 4 channel buttons
         markup = telebot.types.InlineKeyboardMarkup(row_width=1)
         
         for i, channel in enumerate(REQUIRED_CHANNELS):
@@ -306,7 +362,6 @@ def check_callback(call):
         
         markup = telebot.types.InlineKeyboardMarkup(row_width=1)
         for channel in unsubscribed_channels:
-            # Fixes the issue where the bot did not reply due to invalid URL in the button
             button_label = f"🔗 **Join Channel {REQUIRED_CHANNELS.index(channel) + 1}**"
             markup.add(telebot.types.InlineKeyboardButton(button_label, url=channel['invite_link']))
         
