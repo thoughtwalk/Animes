@@ -358,18 +358,28 @@ def check_callback(call):
 # --- Telegram Polling Logic (Runs in a separate thread) ---
 
 def run_bot_polling():
-    """Starts the bot polling in a resilient manner with retries."""
-    print("Starting Resilient Polling for Telegram updates...")
-    # This loop ensures that the Polling thread never permanently crashes.
+    """Starts the bot polling in a resilient manner with retries and cleanup."""
+    print("Starting Resilient Polling for Telegram updates with cleanup...")
+    
+    # CRITICAL: 409 Error Fix (Webhook Cleanup)
+    try:
+        # Webhook को हटाना सुनिश्चित करता है कि Polling शुरू करने से पहले कोई पुराना Webhook/Polling session सक्रिय न हो
+        bot.delete_webhook()
+        print("Successfully cleaned up any old webhook/polling sessions.")
+    except Exception as e:
+        # यह पहली बार में विफल हो सकता है, लेकिन हम इसे नज़रअंदाज़ कर सकते हैं
+        print(f"Webhook cleanup failed (may be harmless): {e}") 
+
+    # यह अनंत लूप सुनिश्चित करता है कि Polling thread कभी भी स्थायी रूप से क्रैश न हो।
     while True:
         try:
             print("Attempting connection to Telegram...")
             # Polling will run indefinitely, looking for updates
             bot.infinity_polling(timeout=20, long_polling_timeout=20, skip_pending=True)
-            # Should not reach here normally, but if it does, exit loop
+            # Should not reach here normally
             break 
         except Exception as e:
-            # If an error occurs (like connection failure during wake-up), retry.
+            # त्रुटि होने पर 10 सेकंड प्रतीक्षा करें और फिर से प्रयास करें।
             print(f"Polling connection ERROR: {e}. Retrying in 10 seconds...")
             time.sleep(10)
 
@@ -392,3 +402,4 @@ if __name__ == '__main__':
     # This block runs ONLY when you execute 'python main.py' locally.
     print("Running locally. Starting bot polling directly.")
     run_bot_polling()
+        
