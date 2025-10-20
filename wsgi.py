@@ -1,22 +1,33 @@
 import threading
 from main import app, run_bot_polling
+import time # Import time for the slight delay check
 
-# Ensure the Polling thread is started only once when Gunicorn begins
+# Flag to ensure polling starts only once
+polling_started = False
 
 def start_polling_thread():
-    # Check if the polling thread is already running
-    for t in threading.enumerate():
-        if t.name == "telegram-polling-thread":
-            return
+    global polling_started
 
-    # If not running, start the thread
+    if polling_started:
+        return
+
+    print("Attempting to start Telegram Polling Thread...")
+
     polling_thread = threading.Thread(target=run_bot_polling, name="telegram-polling-thread")
     polling_thread.daemon = True 
     polling_thread.start()
-    print("Background Telegram Polling Thread Started.")
+
+    # Give the polling thread a moment to start up and connect
+    time.sleep(5) 
+
+    if polling_thread.is_alive():
+        print("SUCCESS: Background Telegram Polling Thread is now active.")
+        polling_started = True
+    else:
+        print("WARNING: Polling Thread failed to stay alive immediately.")
 
 # 1. Start the Polling in a background thread
 start_polling_thread()
 
 # 2. Export the Flask app for Gunicorn
-app = app # Re-export the app instance for Gunicorn
+app = app 
