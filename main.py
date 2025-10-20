@@ -358,18 +358,26 @@ def check_callback(call):
 # --- Telegram Polling Logic (Runs in a separate thread) ---
 
 def run_bot_polling():
-    """Starts the bot polling in a non-blocking manner."""
-    print("Starting Polling for Telegram updates in a separate thread...")
-    try:
-        # Polling will run indefinitely, looking for updates
-        bot.infinity_polling(timeout=20, long_polling_timeout=20, skip_pending=True)
-    except Exception as e:
-        print(f"FATAL POLLING ERROR: {e}")
+    """Starts the bot polling in a resilient manner with retries."""
+    print("Starting Resilient Polling for Telegram updates...")
+    # This loop ensures that the Polling thread never permanently crashes.
+    while True:
+        try:
+            print("Attempting connection to Telegram...")
+            # Polling will run indefinitely, looking for updates
+            bot.infinity_polling(timeout=20, long_polling_timeout=20, skip_pending=True)
+            # Should not reach here normally, but if it does, exit loop
+            break 
+        except Exception as e:
+            # If an error occurs (like connection failure during wake-up), retry.
+            print(f"Polling connection ERROR: {e}. Retrying in 10 seconds...")
+            time.sleep(10)
 
 
 # --- FLASK APP FOR RENDER COMPLIANCE (NEW) ---
 
 # Create a Flask instance for Gunicorn to run
+# This is exported for Gunicorn via wsgi.py
 app = Flask(__name__)
 
 @app.route('/')
