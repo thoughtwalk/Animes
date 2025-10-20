@@ -1,17 +1,19 @@
 import threading
 from main import app, run_bot_polling
 import time
+import signal # Signal module import करें
+import sys
 
-# Flag to ensure polling starts only once
+# Global variable for the polling thread
+polling_thread = None
 polling_started = False
 
 def start_polling_thread():
-    global polling_started
+    global polling_started, polling_thread
     
     if polling_started:
         return
 
-    # Gunicorn worker को शुरू होने के लिए 1 सेकंड दें
     time.sleep(1) 
     
     print("Attempting to start Telegram Polling Thread...")
@@ -20,17 +22,34 @@ def start_polling_thread():
     polling_thread.daemon = True 
     polling_thread.start()
     
-    # Polling thread को Telegram से कनेक्ट होने के लिए पर्याप्त समय दें
     time.sleep(5) 
     
     if polling_thread.is_alive():
-        print("SUCCESS: Background Telegram Polling Thread is now active and SHOULD handle wake-up.")
+        print("SUCCESS: Background Telegram Polling Thread is now active.")
         polling_started = True
     else:
         print("WARNING: Polling Thread failed to stay alive immediately.")
 
-# 1. Start the Polling in a background thread
+# --- SIGTERM Signal Handler ---
+def sigterm_handler(_signo, _stack_frame):
+    """Gracefully shuts down the polling thread on SIGTERM from Gunicorn."""
+    global polling_thread
+    print("Received SIGTERM signal. Attempting to shut down Polling Thread...")
+    
+    # NOTE: Python's threading library doesn't easily allow forced thread termination.
+    # The best we can do is signal the main process to exit gracefully.
+    # Since our polling is in an infinite loop, we rely on the parent process exit.
+    
+    # We rely on the daemon=True setting, but explicitly exiting the process helps.
+    sys.exit(0)
+
+
+# 1. Register the signal handler
+# Gunicorn sends SIGTERM when shutting down.
+signal.signal(signal.SIGTERM, sigterm_handler)
+
+# 2. Start the Polling in a background thread
 start_polling_thread()
 
-# 2. Export the Flask app for Gunicorn
+# 3. Export the Flask app for Gunicorn
 app = app 
