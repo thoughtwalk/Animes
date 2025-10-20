@@ -5,7 +5,7 @@ import threading
 import string
 import random
 import time
-from flask import Flask # Flask imported for Render Web Service compliance
+from flask import Flask 
 
 # --- CONFIGURATION SETTINGS ---
 # BOT_TOKEN is loaded from environment variables (Render Environment Variables)
@@ -374,9 +374,9 @@ def run_bot_polling():
     while True:
         try:
             print("Attempting connection to Telegram...")
-            # Polling will run indefinitely, looking for updates
-            bot.infinity_polling(timeout=20, long_polling_timeout=20, skip_pending=True)
-            # Should not reach here normally
+            # long_polling_timeout को Render के वेक-अप समय (50 सेकंड) से अधिक सेट करें
+            # यह सुनिश्चित करता है कि Render के जागने के दौरान मैसेज खो न जाए।
+            bot.infinity_polling(timeout=20, long_polling_timeout=90, skip_pending=True)
             break 
         except Exception as e:
             # त्रुटि होने पर 10 सेकंड प्रतीक्षा करें और फिर से प्रयास करें।
@@ -402,4 +402,4 @@ if __name__ == '__main__':
     # This block runs ONLY when you execute 'python main.py' locally.
     print("Running locally. Starting bot polling directly.")
     run_bot_polling()
-        
+                
