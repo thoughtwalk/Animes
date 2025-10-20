@@ -15,13 +15,12 @@ DATABASE_FILE = 'database.json' # Database file name
 SHORT_ID_LENGTH = 6 # Payload length, e.g., 'oev4Di'
 
 # Required Channel Subscriptions (ID and Invite Link)
-# ⚠️ NOTE: Please ensure the invite link for Channel 4 is correct.
+# 🚨 URL FIX: Channel 2 link has been corrected by adding 'https://t.me/'
 REQUIRED_CHANNELS = [
     {"name": "Channel 1 (Anime Content)", "id": -1003144969778, "invite_link": "https://t.me/onepieceisreal144"},
-    {"name": "Channel 2 (Anime Content)", "id": -1003104977687, "invite_link": "https://tme/onepieceisreal155"},
+    # 💥 यहाँ 'https://t.me/' जोड़ा गया है 💥
+    {"name": "Channel 2 (Anime Content)", "id": -1003104977687, "invite_link": "https://t.me/onepieceisreal155"},
     {"name": "Channel 3 (Anime Content)", "id": -1002965575141, "invite_link": "https://t.me/entertaining166"},
-    
-    # 🌟 आपका नया Channel 4 यहाँ जोड़ा गया है 🌟
     {"name": "Channel 4 (Anime Content)", "id": -1003069758570, "invite_link": "https://t.me/anime14400"} 
 ]
 
@@ -169,7 +168,7 @@ def handle_start(message):
             "**Thank you for choosing us!** Enjoy the content! ✨"
         )
         
-        # Generate 4 channel buttons
+        # Generate 4 channel buttons (Fixes the issue where the bot did not reply due to invalid URL in the button)
         markup = telebot.types.InlineKeyboardMarkup(row_width=1)
         
         for i, channel in enumerate(REQUIRED_CHANNELS):
@@ -307,6 +306,7 @@ def check_callback(call):
         
         markup = telebot.types.InlineKeyboardMarkup(row_width=1)
         for channel in unsubscribed_channels:
+            # Fixes the issue where the bot did not reply due to invalid URL in the button
             button_label = f"🔗 **Join Channel {REQUIRED_CHANNELS.index(channel) + 1}**"
             markup.add(telebot.types.InlineKeyboardButton(button_label, url=channel['invite_link']))
         
