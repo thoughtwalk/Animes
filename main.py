@@ -19,7 +19,6 @@ DELETION_TIME_MINUTES = 30
 DELETION_TIME_SECONDS = DELETION_TIME_MINUTES * 60
 
 # Required Channel Subscriptions (ID and Invite Link)
-# FIX APPLIED: All URL formats corrected to 'https://t.me/' to solve 400 Bad Request error.
 REQUIRED_CHANNELS = [
     {
         "name": "Channel 1 (Anime Content)",
@@ -46,7 +45,7 @@ REQUIRED_CHANNELS = [
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# --- DATABASE FUNCTIONS ---
+# --- DATABASE FUNCTIONS (Same as before) ---
 
 def load_database():
     """ Loads database from JSON file. """
@@ -76,7 +75,7 @@ def generate_short_id(db):
             return short_id
 
 
-# --- Deep Link GENERATION FUNCTION ---
+# --- Deep Link GENERATION FUNCTION (Same as before) ---
 
 
 def create_deep_link_and_send(chat_id, content_data):
@@ -119,34 +118,59 @@ def create_deep_link_and_send(chat_id, content_data):
             parse_mode='HTML')
 
 
-# --- DELETION LOGIC ---
+# --- DELETION LOGIC (FIXED AND UPDATED) ---
 
+def schedule_deletion_cleanup(chat_id, message_id_to_delete, delay_seconds):
+    """ Helper function to clean up the confirmation message after a short delay. """
+    time.sleep(delay_seconds)
+    try:
+        bot.delete_message(chat_id, message_id_to_delete)
+        print(f"✅ Cleaned up confirmation message {message_id_to_delete}.")
+    except Exception as e:
+        print(f"⚠️ Could not delete cleanup message {message_id_to_delete}: {e}")
 
-def schedule_deletion(chat_id, message_id, delay_seconds):
+def schedule_deletion(chat_id, message_id_to_delete, delay_seconds, is_file=False):
     """
     Schedules the deletion of a specific message after a given delay 
-    using a background thread.
+    using a background thread, with robust error handling.
     """
 
-    def delete_message():
+    def delete_message_thread():
+        # Wait for the specified time
         time.sleep(delay_seconds)
+        
         try:
-            bot.delete_message(chat_id, message_id)
-            print(
-                f"✅ Deleted message {message_id} in chat {chat_id} after {delay_seconds} seconds."
-            )
-        except Exception as e:
-            # Prevents deletion error from crashing the thread
-            print(
-                f"⚠️ Could not delete message {message_id} in chat {chat_id}: {e}"
-            )
+            # Attempt to delete the original message (Warning or File)
+            bot.delete_message(chat_id, message_id_to_delete)
+            print(f"✅ Successfully deleted message {message_id_to_delete} in chat {chat_id} (is_file: {is_file}).")
+            
+            # Send the confirmation message only when deleting the actual file message (is_file=True)
+            # This ensures the message is sent only once.
+            if is_file:
+                # Send the "message is deleted" confirmation
+                confirmation_msg = bot.send_message(
+                    chat_id,
+                    "🗑️ **Content Removed:** The file and its warning message have been automatically deleted from this chat after 30 minutes. You can access it again via the Deep Link.",
+                    parse_mode='Markdown'
+                )
+                # Schedule the confirmation message itself to be deleted after a short time (e.g., 5 minutes = 300 seconds)
+                threading.Thread(target=schedule_deletion_cleanup, 
+                                 args=(chat_id, confirmation_msg.message_id, 5 * 60)).start()
 
-    deletion_thread = threading.Thread(target=delete_message)
+        except telebot.apihelper.ApiException as e:
+            # Ignore "Message to delete not found" (which happens if user deletes it first)
+            if 'message to delete not found' not in str(e):
+                print(f"⚠️ Could not delete message {message_id_to_delete} in chat {chat_id}: {e}")
+        except Exception as e:
+            # Prevents unexpected errors from crashing the thread
+            print(f"🚨 Unexpected error in deletion thread for {message_id_to_delete}: {e}")
+
+    deletion_thread = threading.Thread(target=delete_message_thread)
     deletion_thread.daemon = True
     deletion_thread.start()
 
 
-# --- OTHER UTILITY FUNCTIONS ---
+# --- OTHER UTILITY FUNCTIONS (Same as before) ---
 
 
 def get_unsubscribed_channels(user_id):
@@ -170,6 +194,9 @@ def get_unsubscribed_channels(user_id):
             # For network or other unexpected errors
             unsubscribed_channels.append(channel)
     return unsubscribed_channels
+
+
+# --- send_final_content() (UPDATED to pass is_file=True/False) ---
 
 
 def send_final_content(chat_id, short_id):
@@ -214,10 +241,14 @@ def send_final_content(chat_id, short_id):
         )
 
         # --- SCHEDULE DELETION ---
+        # 1. Schedule the Warning message for deletion (is_file=False)
         schedule_deletion(chat_id, warning_message.message_id,
-                          DELETION_TIME_SECONDS)
+                          DELETION_TIME_SECONDS, is_file=False)
+                          
+        # 2. Schedule the actual File message for deletion (is_file=True)
+        #    This is the message whose deletion will trigger the final confirmation.
         schedule_deletion(chat_id, file_message.message_id,
-                          DELETION_TIME_SECONDS)
+                          DELETION_TIME_SECONDS, is_file=True)
 
     except Exception as e:
         # Prevents bot from crashing on invalid/expired file_id
@@ -228,7 +259,7 @@ def send_final_content(chat_id, short_id):
             parse_mode='HTML')
 
 
-# --- COMMAND HANDLERS ---
+# --- COMMAND HANDLERS (Same as before) ---
 
 
 @bot.message_handler(commands=['start'])
@@ -309,7 +340,7 @@ def handle_generate_command(message):
         print(f"Error in handle_generate_command: {e}")
 
 
-# --- NEXT STEP HANDLERS (Same as before, wrapped in try/except) ---
+# --- NEXT STEP HANDLERS (Same as before) ---
 
 
 def handle_file_upload(message):
@@ -369,7 +400,7 @@ def handle_caption_input(message, file_id):
         print(f"Error in handle_caption_input: {e}")
 
 
-# --- GENERAL TEXT HANDLER (Wrapped in try/except) ---
+# --- GENERAL TEXT HANDLER (Same as before) ---
 
 
 @bot.message_handler(func=lambda message: True, content_types=['text'])
@@ -387,7 +418,7 @@ def handle_text_messages(message):
         print(f"Error in handle_text_messages: {e}")
 
 
-# --- CALLBACK HANDLERS (Wrapped in try/except) ---
+# --- CALLBACK HANDLERS (Same as before) ---
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('check_'))
@@ -441,15 +472,14 @@ def check_callback(call):
         print(f"Error in check_callback: {e}")
 
 
-# --- KEEP-ALIVE MECHANISM ---
+# --- KEEP-ALIVE MECHANISM (Same as before) ---
 
 def keep_alive():
     """ 
     Sends an external request every 25 minutes to prevent the inactivity timer.
     """
-    # Using the Render URL itself ensures we are testing the actual service path
-    # NOTE: You MUST replace this with your actual Public URL before final deployment!
-    RENDER_PUBLIC_URL = os.environ.get('RENDER_EXTERNAL_URL', 'https://anime-bot-d3r1fcd6ubrc738b66lg.onrender.com/')
+    # NOTE: RENDER_EXTERNAL_URL is set in your Render dashboard Environment Variables
+    RENDER_PUBLIC_URL = os.environ.get('RENDER_EXTERNAL_URL', 'https://animes1.onrender.com/')
     PING_INTERVAL_SECONDS = 25 * 60 
 
     while True:
@@ -463,19 +493,17 @@ def keep_alive():
         
         time.sleep(PING_INTERVAL_SECONDS)
 
-# --- START SERVER AND POLLING ---
+# --- START SERVER AND POLLING (Same as before) ---
 
 
 @app.route('/', methods=['GET', 'HEAD'])
 def index():
-    # Crucial fix: Ensure this always works and logs any access attempts
+    # Ensures the root path always returns 200 OK for UptimeRobot
     try:
         print("🌐 Received GET/HEAD request on root path. Returning 200 OK.")
-        # This returns the expected content and a 200 OK status code.
         return 'Bot is running...', 200
     except Exception as e:
         print(f"🚨 Critical Flask Error in index route: {e}")
-        # Even if there's an internal Flask error, we try to return 500, not 404.
         return 'Internal Server Error', 500 
 
 
@@ -501,10 +529,4 @@ if __name__ == '__main__':
     polling_thread.daemon = True
     polling_thread.start()
     
-    # 2. Start the Keep-Alive Thread (to prevent sleeping)
-    keep_alive_thread = threading.Thread(target=keep_alive)
-    keep_alive_thread.daemon = True
-    keep_alive_thread.start()
-
-    # 3. Start the Flask Server (This keeps the Render URL alive)
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    # 2. Start the Keep-Alive Thread (to prev
