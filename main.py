@@ -9,18 +9,17 @@ import requests
 from flask import Flask, request
 
 # --- CONFIGURATION SETTINGS ---
-# BOT_TOKEN is loaded from environment variables (Replit Secrets or Render Environment Variables)
-BOT_TOKEN = os.environ.get('BOT_TOKEN',
-                           '7902930015:AAEnGzQaZHdRcmuAxWIPDIcerJVqRhmx9D4')
+# BOT_TOKEN is loaded from environment variables (Render Environment Variables)
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '7902930015:AAEnGzQaZHdRcmuAxWIPDIcerJVqRhmx9D4')
 ADMIN_ID = 5312279751  # Your Admin ID
 BOT_USERNAME = 'One_piece_is_real_bot'  # Your Bot Username
-DATABASE_FILE = 'database.json'  # Database file name
+DATABASE_FILE = 'database.json'
 SHORT_ID_LENGTH = 6
 DELETION_TIME_MINUTES = 30
 DELETION_TIME_SECONDS = DELETION_TIME_MINUTES * 60
 
 # Required Channel Subscriptions (ID and Invite Link)
-# FIX APPLIED: URL format corrected to 'https://t.me/'
+# FIX APPLIED: All URL formats corrected to 'https://t.me/' to solve 400 Bad Request error.
 REQUIRED_CHANNELS = [
     {
         "name": "Channel 1 (Anime Content)",
@@ -30,7 +29,6 @@ REQUIRED_CHANNELS = [
     {
         "name": "Channel 2 (Anime Content)",
         "id": -1003104977687,
-        # ERRORS SOLVED: Link corrected from 'https://tme/...' to 'https://t.me/...'
         "invite_link": "https://t.me/onepieceisreal155" 
     },
     {
@@ -46,7 +44,7 @@ REQUIRED_CHANNELS = [
 ]
 
 bot = telebot.TeleBot(BOT_TOKEN)
-app = Flask(__name__) # Corrected Flask initialization
+app = Flask(__name__)
 
 # --- DATABASE FUNCTIONS ---
 
@@ -138,6 +136,7 @@ def schedule_deletion(chat_id, message_id, delay_seconds):
                 f"✅ Deleted message {message_id} in chat {chat_id} after {delay_seconds} seconds."
             )
         except Exception as e:
+            # Prevents deletion error from crashing the thread
             print(
                 f"⚠️ Could not delete message {message_id} in chat {chat_id}: {e}"
             )
@@ -159,8 +158,17 @@ def get_unsubscribed_channels(user_id):
             member = bot.get_chat_member(channel['id'], user_id)
             if member.status not in ['member', 'administrator', 'creator']:
                 unsubscribed_channels.append(channel)
+        except telebot.apihelper.ApiException as e:
+            # Added robust error handling: if bot can't access channel data, 
+            # assume user has not joined and request them to join.
+            if 'user not found' in str(e) or 'Bad Request: chat not found' in str(e):
+                unsubscribed_channels.append(channel)
+            else:
+                 # Log other API errors but proceed
+                print(f"⚠️ Telegram API Error in get_unsubscribed_channels for {channel['name']}: {e}")
+                unsubscribed_channels.append(channel) 
         except Exception:
-            # If get_chat_member fails (e.g., bot is not admin, or user is blocked)
+            # For network or other unexpected errors
             unsubscribed_channels.append(channel)
     return unsubscribed_channels
 
@@ -213,6 +221,7 @@ def send_final_content(chat_id, short_id):
                           DELETION_TIME_SECONDS)
 
     except Exception as e:
+        # Prevents bot from crashing on invalid/expired file_id
         print(f"Error sending content or invalid link: {e}")
         bot.send_message(
             chat_id,
@@ -225,207 +234,226 @@ def send_final_content(chat_id, short_id):
 
 @bot.message_handler(commands=['start'])
 def handle_start(message):
-    chat_id = message.chat.id
-    payload = None
+    try:
+        chat_id = message.chat.id
+        payload = None
 
-    if message.text and len(message.text.split()) > 1:
-        payload = message.text.split()[1]
+        if message.text and len(message.text.split()) > 1:
+            payload = message.text.split()[1]
 
-    if not payload:
+        if not payload:
 
-        welcome_text = (
-            "👋 <b>Welcome to your Anime Content Bot!</b> 🎬\n\n"
-            "My main purpose is to provide you with your favorite <b>Anime Content Files</b> (MKV/Videos/Documents).\n\n"
-            "To access the content, please follow these simple steps:\n"
-            "1️⃣ <b>Join our Channels</b> below and find the content you want to view.\n"
-            "2️⃣ Click the <b>button</b> provided beneath the content in the channel.\n"
-            "3️⃣ I will verify your joining and instantly deliver the file to you! ✅\n\n" 
-            "<b>Thank you for choosing us!</b> Enjoy the content! ✨")
+            welcome_text = (
+                "👋 <b>Welcome to your Anime Content Bot!</b> 🎬\n\n"
+                "My main purpose is to provide you with your favorite <b>Anime Content Files</b> (MKV/Videos/Documents).\n\n"
+                "To access the content, please follow these simple steps:\n"
+                "1️⃣ <b>Join our Channels</b> below and find the content you want to view.\n"
+                "2️⃣ Click the <b>button</b> provided beneath the content in the channel.\n"
+                "3️⃣ I will verify your joining and instantly deliver the file to you! ✅\n\n" 
+                "<b>Thank you for choosing us!</b> Enjoy the content! ✨")
 
-        markup = telebot.types.InlineKeyboardMarkup(row_width=1)
-        for i, channel in enumerate(REQUIRED_CHANNELS):
-            button_label = f"🔗 Channel {i+1} - View Content"
+            markup = telebot.types.InlineKeyboardMarkup(row_width=1)
+            for i, channel in enumerate(REQUIRED_CHANNELS):
+                button_label = f"🔗 Channel {i+1} - View Content"
+                markup.add(
+                    telebot.types.InlineKeyboardButton(button_label,
+                                                       url=channel['invite_link']))
+
+            bot.send_message(chat_id,
+                            welcome_text,
+                            parse_mode='HTML',
+                            reply_markup=markup)  
+            return
+
+        unsubscribed_channels = get_unsubscribed_channels(chat_id)
+
+        if not unsubscribed_channels:
+            send_final_content(chat_id, payload)
+        else:
+            
+            text = "⚠️ <b>Joining Required!</b> Please join ALL the channels below to proceed, then click the '✅ I Have Joined' button."
+
+            markup = telebot.types.InlineKeyboardMarkup(row_width=1)
+            for channel in unsubscribed_channels:
+                button_label = f"🔗 Join Channel {REQUIRED_CHANNELS.index(channel) + 1}"
+                markup.add(
+                    telebot.types.InlineKeyboardButton(button_label,
+                                                       url=channel['invite_link']))
+
+            callback_data = f"check_{payload}"
             markup.add(
-                telebot.types.InlineKeyboardButton(button_label,
-                                                   url=channel['invite_link']))
+                telebot.types.InlineKeyboardButton("✅ I Have Joined",
+                                                   callback_data=callback_data))
 
-        bot.send_message(chat_id,
-                         welcome_text,
-                         parse_mode='HTML',
-                         reply_markup=markup)  
-        return
-
-    unsubscribed_channels = get_unsubscribed_channels(chat_id)
-
-    if not unsubscribed_channels:
-        send_final_content(chat_id, payload)
-    else:
-        
-        text = "⚠️ <b>Joining Required!</b> Please join ALL the channels below to proceed, then click the '✅ I Have Joined' button."
-
-        markup = telebot.types.InlineKeyboardMarkup(row_width=1)
-        for channel in unsubscribed_channels:
-            button_label = f"🔗 Join Channel {REQUIRED_CHANNELS.index(channel) + 1}"
-            markup.add(
-                telebot.types.InlineKeyboardButton(button_label,
-                                                   url=channel['invite_link']))
-
-        callback_data = f"check_{payload}"
-        markup.add(
-            telebot.types.InlineKeyboardButton("✅ I Have Joined",
-                                               callback_data=callback_data))
-
-        bot.send_message(chat_id, text, reply_markup=markup,
-                         parse_mode='HTML')  
+            bot.send_message(chat_id, text, reply_markup=markup,
+                            parse_mode='HTML')
+    except Exception as e:
+        print(f"Error in handle_start: {e}")
 
 
 # Admin Command: Deep Link Generation Mode
 @bot.message_handler(commands=['generate'])
 def handle_generate_command(message):
-    if message.chat.id != ADMIN_ID:
-        return bot.send_message(
-            message.chat.id,
-            "❌ <b>Error:</b> This command is for the <b>Admin Only</b>.",
+    try:
+        if message.chat.id != ADMIN_ID:
+            return bot.send_message(
+                message.chat.id,
+                "❌ <b>Error:</b> This command is for the <b>Admin Only</b>.",
+                parse_mode='HTML')
+
+        bot.send_message(
+            ADMIN_ID,
+            "✅ <b>Deep Link Generation Mode (File):</b> Please send the file (Video, MKV, or any Document) for which you want to generate a <b>Short Deep Link</b>. <i>Note: The caption will automatically be formatted as BOLD.</i>",
             parse_mode='HTML')
-
-    bot.send_message(
-        ADMIN_ID,
-        "✅ <b>Deep Link Generation Mode (File):</b> Please send the file (Video, MKV, or any Document) for which you want to generate a <b>Short Deep Link</b>. <i>Note: The caption will automatically be formatted as BOLD.</i>",
-        parse_mode='HTML')
-    bot.register_next_step_handler(message, handle_file_upload)
+        bot.register_next_step_handler(message, handle_file_upload)
+    except Exception as e:
+        print(f"Error in handle_generate_command: {e}")
 
 
-# --- NEXT STEP HANDLERS ---
+# --- NEXT STEP HANDLERS (Same as before, wrapped in try/except) ---
 
 
 def handle_file_upload(message):
     """ Captures the file ID and asks for the caption. """
-    if message.chat.id != ADMIN_ID:
-        return
+    try:
+        if message.chat.id != ADMIN_ID:
+            return
 
-    file_id = None
+        file_id = None
 
-    if message.document:
-        file_id = message.document.file_id
-    elif message.video:
-        file_id = message.video.file_id
-    elif message.photo:
-        file_id = message.photo[-1].file_id
+        if message.document:
+            file_id = message.document.file_id
+        elif message.video:
+            file_id = message.video.file_id
+        elif message.photo:
+            file_id = message.photo[-1].file_id
 
-    if file_id:
-        bot.send_message(
-            ADMIN_ID,
-            "📝 <b>Caption Required:</b> Please send the text (Caption) you want to attach to this content. <i>You can include @usernames, and the entire caption will be automatically made BOLD.</i>",
-            parse_mode='HTML')
-        bot.register_next_step_handler(message, handle_caption_input, file_id)
+        if file_id:
+            bot.send_message(
+                ADMIN_ID,
+                "📝 <b>Caption Required:</b> Please send the text (Caption) you want to attach to this content. <i>You can include @usernames, and the entire caption will be automatically made BOLD.</i>",
+                parse_mode='HTML')
+            bot.register_next_step_handler(message, handle_caption_input, file_id)
 
-    else:
-        bot.send_message(
-            ADMIN_ID,
-            "❌ <b>Error:</b> No file (MKV/Video/Document) detected. Please ensure you <b>upload it directly or forward a message that contains an actual file</b>. Send the file again.",
-            parse_mode='HTML')
-        bot.register_next_step_handler(message, handle_file_upload)
+        else:
+            bot.send_message(
+                ADMIN_ID,
+                "❌ <b>Error:</b> No file (MKV/Video/Document) detected. Please ensure you <b>upload it directly or forward a message that contains an actual file</b>. Send the file again.",
+                parse_mode='HTML')
+            bot.register_next_step_handler(message, handle_file_upload)
+    except Exception as e:
+        print(f"Error in handle_file_upload: {e}")
 
 
 def handle_caption_input(message, file_id):
     """ Captures the caption, automatically makes it BOLD (using HTML <b>), and generates the final deep link. """
-    if message.chat.id != ADMIN_ID:
-        return
+    try:
+        if message.chat.id != ADMIN_ID:
+            return
 
-    caption_text = message.text.strip() if message.text else ""
+        caption_text = message.text.strip() if message.text else ""
 
-    if not message.text:
-        bot.send_message(
-            ADMIN_ID,
-            "❌ <b>Error:</b> Caption was not detected as text. Please send the caption text again.",
-            parse_mode='HTML')
-        bot.register_next_step_handler(message, handle_caption_input, file_id)
-        return
+        if not message.text:
+            bot.send_message(
+                ADMIN_ID,
+                "❌ <b>Error:</b> Caption was not detected as text. Please send the caption text again.",
+                parse_mode='HTML')
+            bot.register_next_step_handler(message, handle_caption_input, file_id)
+            return
 
-    auto_bold_caption = f"<b>{caption_text}</b>"
+        auto_bold_caption = f"<b>{caption_text}</b>"
 
-    content_data = {'file_id': file_id, 'caption': auto_bold_caption}
+        content_data = {'file_id': file_id, 'caption': auto_bold_caption}
 
-    create_deep_link_and_send(ADMIN_ID, content_data)
+        create_deep_link_and_send(ADMIN_ID, content_data)
+    except Exception as e:
+        print(f"Error in handle_caption_input: {e}")
 
 
-# --- GENERAL TEXT HANDLER ---
+# --- GENERAL TEXT HANDLER (Wrapped in try/except) ---
 
 
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def handle_text_messages(message):
-    chat_id = message.chat.id
-    text = message.text.strip()
+    try:
+        chat_id = message.chat.id
+        text = message.text.strip()
 
-    if not text.startswith('/'):
-        bot.send_message(
-            chat_id,
-            "🤖 <b>I'm an automated bot.</b> Please use a Deep Link from one of our channels or send /start to see my welcome message. ✨",
-            parse_mode='HTML')
+        if not text.startswith('/'):
+            bot.send_message(
+                chat_id,
+                "🤖 <b>I'm an automated bot.</b> Please use a Deep Link from one of our channels or send /start to see my welcome message. ✨",
+                parse_mode='HTML')
+    except Exception as e:
+        print(f"Error in handle_text_messages: {e}")
 
 
-# --- CALLBACK HANDLERS ---
+# --- CALLBACK HANDLERS (Wrapped in try/except) ---
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('check_'))
 def check_callback(call):
-    chat_id = call.message.chat.id
-    message_id = call.message.message_id
+    try:
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id
 
-    bot.answer_callback_query(call.id, "Checking joining status...") 
+        bot.answer_callback_query(call.id, "Checking joining status...") 
 
-    data = call.data.split('_', 1)
-    payload = data[1] if len(data) > 1 and data[1] != 'None' else None
+        data = call.data.split('_', 1)
+        payload = data[1] if len(data) > 1 and data[1] != 'None' else None
 
-    unsubscribed_channels = get_unsubscribed_channels(chat_id)
+        unsubscribed_channels = get_unsubscribed_channels(chat_id)
 
-    if not unsubscribed_channels:
-        
-        bot.edit_message_text(
-            "✅ <b>Verification Successful!</b> Sending your file now... 🚀",
-            chat_id,
-            message_id,
-            parse_mode='HTML'  
-        )
-        if payload:
-            send_final_content(chat_id, payload)
+        if not unsubscribed_channels:
+            
+            bot.edit_message_text(
+                "✅ <b>Verification Successful!</b> Sending your file now... 🚀",
+                chat_id,
+                message_id,
+                parse_mode='HTML'  
+            )
+            if payload:
+                send_final_content(chat_id, payload)
 
-    else:
-        
-        text = "❌ <b>Join Incomplete!</b> Please join ALL the required channels below and then press '🔄 Check Again'."
+        else:
+            
+            text = "❌ <b>Join Incomplete!</b> Please join ALL the required channels below and then press '🔄 Check Again'."
 
-        markup = telebot.types.InlineKeyboardMarkup(row_width=1)
-        for channel in unsubscribed_channels:
-            button_label = f"🔗 Join Channel {REQUIRED_CHANNELS.index(channel) + 1}"
+            markup = telebot.types.InlineKeyboardMarkup(row_width=1)
+            for channel in unsubscribed_channels:
+                button_label = f"🔗 Join Channel {REQUIRED_CHANNELS.index(channel) + 1}"
+                markup.add(
+                    telebot.types.InlineKeyboardButton(button_label,
+                                                       url=channel['invite_link']))
+
+            callback_data = f"check_{payload}"
             markup.add(
-                telebot.types.InlineKeyboardButton(button_label,
-                                                   url=channel['invite_link']))
+                telebot.types.InlineKeyboardButton("🔄 Check Again",
+                                                   callback_data=callback_data))
 
-        callback_data = f"check_{payload}"
-        markup.add(
-            telebot.types.InlineKeyboardButton("🔄 Check Again",
-                                               callback_data=callback_data))
+            bot.edit_message_text(
+                text,
+                chat_id,
+                message_id,
+                reply_markup=markup,
+                parse_mode='HTML'  
+            )
+    except Exception as e:
+        print(f"Error in check_callback: {e}")
 
-        bot.edit_message_text(
-            text,
-            chat_id,
-            message_id,
-            reply_markup=markup,
-            parse_mode='HTML'  
-        )
 
 # --- KEEP-ALIVE MECHANISM ---
-# This internal ping is kept, but the external UptimeRobot ping will be the main driver.
+
 def keep_alive():
     """ 
     Sends an external request every 25 minutes to prevent the inactivity timer.
     """
-    # Using a generic public URL for pinging
     EXTERNAL_PING_URL = "https://google.com" 
     PING_INTERVAL_SECONDS = 25 * 60 
 
     while True:
         try:
+            # We ping Google just to keep the thread alive and check network
             requests.get(EXTERNAL_PING_URL, timeout=10)
         except Exception as e:
             print(f"⚠️ Keep-Alive Error (Network): {e}")
@@ -437,20 +465,21 @@ def keep_alive():
 
 @app.route('/', methods=['GET', 'HEAD'])
 def index():
-    # Render/Heroku uses this endpoint to check if the app is alive.
+    # This endpoint is crucial for UptimeRobot to receive a 200 OK response.
+    # We ensure it always returns a successful status code.
     return 'Bot is running...', 200
 
-# IMPROVED: Polling function now includes a safety loop to auto-restart on error
 def run_bot():
     print("Starting Polling for updates...")
     while True: 
         try:
-            # Using bot.polling() for stability and automatic reconnection on minor errors
-            bot.polling(timeout=20, 
+            # Added long_polling_timeout=30 for better resilience against network issues
+            bot.polling(timeout=30, 
                         skip_pending=True,
-                        non_stop=True) 
+                        non_stop=True,
+                        long_polling_timeout=30) 
         except Exception as e:
-            # Restarts the polling loop on a fatal error
+            # Restarts the polling loop on a fatal error, but keeps the Flask server alive.
             print(f"🚨 FATAL POLLING ERROR: {e}. Restarting polling loop in 5 seconds...")
             time.sleep(5) 
 
@@ -467,6 +496,5 @@ if __name__ == '__main__':
     keep_alive_thread.daemon = True
     keep_alive_thread.start()
 
-    # 3. Start the Flask Server (Render will expose this URL)
+    # 3. Start the Flask Server (This keeps the Render URL alive)
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
-      
