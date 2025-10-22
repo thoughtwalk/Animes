@@ -5,7 +5,7 @@ import threading
 import string
 import random
 import time
-import requests 
+import requests
 from flask import Flask, request
 
 # --- CONFIGURATION SETTINGS ---
@@ -15,11 +15,12 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN',
 ADMIN_ID = 5312279751  # Your Admin ID
 BOT_USERNAME = 'One_piece_is_real_bot'  # Your Bot Username
 DATABASE_FILE = 'database.json'  # Database file name
-SHORT_ID_LENGTH = 6  
-DELETION_TIME_MINUTES = 30  
+SHORT_ID_LENGTH = 6
+DELETION_TIME_MINUTES = 30
 DELETION_TIME_SECONDS = DELETION_TIME_MINUTES * 60
 
 # Required Channel Subscriptions (ID and Invite Link)
+# FIX APPLIED: URL format corrected to 'https://t.me/'
 REQUIRED_CHANNELS = [
     {
         "name": "Channel 1 (Anime Content)",
@@ -29,7 +30,8 @@ REQUIRED_CHANNELS = [
     {
         "name": "Channel 2 (Anime Content)",
         "id": -1003104977687,
-        "invite_link": "https://tme/onepieceisreal155"
+        # ERRORS SOLVED: Link corrected from 'https://tme/...' to 'https://t.me/...'
+        "invite_link": "https://t.me/onepieceisreal155" 
     },
     {
         "name": "Channel 3 (Anime Content)",
@@ -44,7 +46,7 @@ REQUIRED_CHANNELS = [
 ]
 
 bot = telebot.TeleBot(BOT_TOKEN)
-app = Flask(__name__) # <--- FIXED: Corrected the Flask initialization
+app = Flask(__name__) # Corrected Flask initialization
 
 # --- DATABASE FUNCTIONS ---
 
@@ -153,10 +155,12 @@ def get_unsubscribed_channels(user_id):
     unsubscribed_channels = []
     for channel in REQUIRED_CHANNELS:
         try:
+            # Check if user is a member/admin/creator
             member = bot.get_chat_member(channel['id'], user_id)
             if member.status not in ['member', 'administrator', 'creator']:
                 unsubscribed_channels.append(channel)
         except Exception:
+            # If get_chat_member fails (e.g., bot is not admin, or user is blocked)
             unsubscribed_channels.append(channel)
     return unsubscribed_channels
 
@@ -416,6 +420,7 @@ def keep_alive():
     """ 
     Sends an external request every 25 minutes to prevent the inactivity timer.
     """
+    # Using a generic public URL for pinging
     EXTERNAL_PING_URL = "https://google.com" 
     PING_INTERVAL_SECONDS = 25 * 60 
 
@@ -464,3 +469,4 @@ if __name__ == '__main__':
 
     # 3. Start the Flask Server (Render will expose this URL)
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+      
