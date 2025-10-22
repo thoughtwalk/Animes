@@ -159,8 +159,7 @@ def get_unsubscribed_channels(user_id):
             if member.status not in ['member', 'administrator', 'creator']:
                 unsubscribed_channels.append(channel)
         except telebot.apihelper.ApiException as e:
-            # Added robust error handling: if bot can't access channel data, 
-            # assume user has not joined and request them to join.
+            # Handles API errors robustly.
             if 'user not found' in str(e) or 'Bad Request: chat not found' in str(e):
                 unsubscribed_channels.append(channel)
             else:
@@ -448,15 +447,19 @@ def keep_alive():
     """ 
     Sends an external request every 25 minutes to prevent the inactivity timer.
     """
-    EXTERNAL_PING_URL = "https://google.com" 
+    # Using the Render URL itself ensures we are testing the actual service path
+    # NOTE: You MUST replace this with your actual Public URL before final deployment!
+    RENDER_PUBLIC_URL = os.environ.get('RENDER_EXTERNAL_URL', 'https://anime-bot-d3r1fcd6ubrc738b66lg.onrender.com/')
     PING_INTERVAL_SECONDS = 25 * 60 
 
     while True:
         try:
-            # We ping Google just to keep the thread alive and check network
-            requests.get(EXTERNAL_PING_URL, timeout=10)
+            # We ping the Render URL to keep it awake
+            requests.get(RENDER_PUBLIC_URL, timeout=10)
+            print(f"🚀 Keep-Alive Ping Sent to {RENDER_PUBLIC_URL}. Timer reset.")
         except Exception as e:
-            print(f"⚠️ Keep-Alive Error (Network): {e}")
+            # If the ping fails, log the error but keep the thread alive
+            print(f"⚠️ Keep-Alive Error (Pinging Render URL): {e}. Trying again soon.")
         
         time.sleep(PING_INTERVAL_SECONDS)
 
@@ -465,9 +468,16 @@ def keep_alive():
 
 @app.route('/', methods=['GET', 'HEAD'])
 def index():
-    # This endpoint is crucial for UptimeRobot to receive a 200 OK response.
-    # We ensure it always returns a successful status code.
-    return 'Bot is running...', 200
+    # Crucial fix: Ensure this always works and logs any access attempts
+    try:
+        print("🌐 Received GET/HEAD request on root path. Returning 200 OK.")
+        # This returns the expected content and a 200 OK status code.
+        return 'Bot is running...', 200
+    except Exception as e:
+        print(f"🚨 Critical Flask Error in index route: {e}")
+        # Even if there's an internal Flask error, we try to return 500, not 404.
+        return 'Internal Server Error', 500 
+
 
 def run_bot():
     print("Starting Polling for updates...")
