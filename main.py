@@ -10,7 +10,6 @@ from flask import Flask, request
 
 # --- CONFIGURATION SETTINGS ---
 # BOT_TOKEN is loaded from environment variables (Render Environment Variables)
-# कृपया यहां अपने वास्तविक BOT_TOKEN को ENV में ही रखें
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '7902930015:AAEnGzQaZHdRcmuAxWIPDIcerJVqRhmx9D4') 
 ADMIN_ID = 5312279751  # Your Admin ID
 BOT_USERNAME = 'One_piece_is_real_bot'  # Your Bot Username
@@ -64,7 +63,7 @@ def load_database():
 def save_database(db):
     """ Saves the database to JSON file. """
     with open(DATABASE_FILE, 'w') as f:
-        json.dump(db, f, indent=4)
+        json.dump(db, db, indent=4)
 
 
 def generate_short_id(db):
@@ -148,10 +147,10 @@ def schedule_deletion(chat_id, message_id_to_delete, delay_seconds, is_file=Fals
             
             # Send the confirmation message only when deleting the actual file message (is_file=True)
             if is_file:
-                # Confirmation message updated to reflect 10 minutes deletion
+                # Updated confirmation message as requested
                 confirmation_msg = bot.send_message(
                     chat_id,
-                    "🗑️ **Content Removed:** The file and its warning message have been automatically deleted from this chat after 10 minutes.",
+                    "**🚨 File Deleted: This file is deleted due to the 10-minute time limit.**",
                     parse_mode='Markdown'
                 )
                 # Schedule the confirmation message itself to be deleted after 5 minutes (300 seconds)
@@ -485,7 +484,7 @@ def keep_alive():
         try:
             # We ping the Render URL to keep it awake
             requests.get(RENDER_PUBLIC_URL, timeout=10)
-            # print(f"🚀 Keep-Alive Ping Sent to {RENDER_PUBLIC_URL}. Timer reset.") # Commented out for cleaner logs
+            # print(f"🚀 Keep-Alive Ping Sent to {RENDER_PUBLIC_URL}. Timer reset.")
         except Exception as e:
             # If the ping fails, log the error but keep the thread alive
             print(f"⚠️ Keep-Alive Error (Pinging Render URL): {e}. Trying again soon.")
@@ -499,6 +498,7 @@ def keep_alive():
 def index():
     # Ensures the root path always returns 200 OK for UptimeRobot
     try:
+        # print("🌐 Received GET/HEAD request on root path. Returning 200 OK.")
         return 'Bot is running...', 200
     except Exception as e:
         print(f"🚨 Critical Flask Error in index route: {e}")
@@ -534,3 +534,4 @@ if __name__ == '__main__':
 
     # 3. Start the Flask Server (This keeps the Render URL alive)
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    
