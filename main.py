@@ -63,7 +63,8 @@ def load_database():
 def save_database(db):
     """ Saves the database to JSON file. """
     with open(DATABASE_FILE, 'w') as f:
-        json.dump(db, db, indent=4)
+        json.dump(db, f, indent=4) # <-- FIX: Changed 'db' to 'f' here
+        # Note: This change fixes the 'Failed to generate Deep Link' error.
 
 
 def generate_short_id(db):
@@ -147,7 +148,7 @@ def schedule_deletion(chat_id, message_id_to_delete, delay_seconds, is_file=Fals
             
             # Send the confirmation message only when deleting the actual file message (is_file=True)
             if is_file:
-                # Updated confirmation message as requested
+                # Updated confirmation message as requested: "This file is deleted due to 10 minutes time limit"
                 confirmation_msg = bot.send_message(
                     chat_id,
                     "**🚨 File Deleted: This file is deleted due to the 10-minute time limit.**",
@@ -533,5 +534,4 @@ if __name__ == '__main__':
     keep_alive_thread.start()
 
     # 3. Start the Flask Server (This keeps the Render URL alive)
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
-    
+    app.run(h
