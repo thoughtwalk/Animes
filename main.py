@@ -15,7 +15,8 @@ ADMIN_ID = 5312279751  # Your Admin ID
 BOT_USERNAME = 'One_piece_is_real_bot'  # Your Bot Username
 DATABASE_FILE = 'database.json'
 SHORT_ID_LENGTH = 6
-DELETION_TIME_MINUTES = 30
+# >>> CHANGE 1: Deletion time changed to 10 minutes
+DELETION_TIME_MINUTES = 10
 DELETION_TIME_SECONDS = DELETION_TIME_MINUTES * 60
 
 # Required Channel Subscriptions (ID and Invite Link)
@@ -118,7 +119,7 @@ def create_deep_link_and_send(chat_id, content_data):
             parse_mode='HTML')
 
 
-# --- DELETION LOGIC (FIXED AND UPDATED) ---
+# --- DELETION LOGIC (FIXED AND UPDATED FOR 10 MIN) ---
 
 def schedule_deletion_cleanup(chat_id, message_id_to_delete, delay_seconds):
     """ Helper function to clean up the confirmation message after a short delay. """
@@ -136,7 +137,7 @@ def schedule_deletion(chat_id, message_id_to_delete, delay_seconds, is_file=Fals
     """
 
     def delete_message_thread():
-        # Wait for the specified time
+        # Wait for the specified time (10 minutes)
         time.sleep(delay_seconds)
         
         try:
@@ -145,12 +146,11 @@ def schedule_deletion(chat_id, message_id_to_delete, delay_seconds, is_file=Fals
             print(f"✅ Successfully deleted message {message_id_to_delete} in chat {chat_id} (is_file: {is_file}).")
             
             # Send the confirmation message only when deleting the actual file message (is_file=True)
-            # This ensures the message is sent only once.
             if is_file:
-                # Send the "message is deleted" confirmation
+                # >>> CHANGE 3: Confirmation message updated to 10 minutes
                 confirmation_msg = bot.send_message(
                     chat_id,
-                    "🗑️ **Content Removed:** The file and its warning message have been automatically deleted from this chat after 30 minutes. You can access it again via the Deep Link.",
+                    "🗑️ **Content Removed:** The file and its warning message have been automatically deleted from this chat after 10 minutes.",
                     parse_mode='Markdown'
                 )
                 # Schedule the confirmation message itself to be deleted after a short time (e.g., 5 minutes = 300 seconds)
@@ -196,7 +196,7 @@ def get_unsubscribed_channels(user_id):
     return unsubscribed_channels
 
 
-# --- send_final_content() (UPDATED to pass is_file=True/False) ---
+# --- send_final_content() (UPDATED Warning Message) ---
 
 
 def send_final_content(chat_id, short_id):
@@ -223,11 +223,12 @@ def send_final_content(chat_id, short_id):
             parse_mode='HTML')
 
         # --- WARNING MESSAGE ---
+        # >>> CHANGE 2: Warning message updated to 10 minutes and made entirely BOLD
         warning_message = bot.send_message(
             chat_id,
-            "🚨 <b>SECURITY ALERT!</b> 🚨\n\n"
-            "<b>This file will be automatically deleted from this chat in 30 minutes.</b>\n\n"
-            "To keep the content, please <b>Forward</b> it immediately to your <i>Saved Messages</i> or another private chat/channel. The link will expire after the deletion.",
+            "<b>🚨 SECURITY ALERT! 🚨\n\n"
+            "This file will be automatically deleted from this chat in 10 minutes.\n\n"
+            "To keep the content, please Forward it immediately to your Saved Messages or another private chat/channel. The link will expire after the deletion.</b>",
             parse_mode='HTML'
         )
 
@@ -529,4 +530,4 @@ if __name__ == '__main__':
     polling_thread.daemon = True
     polling_thread.start()
     
-    # 2. Start the Keep-Alive Thread (to prev
+   
