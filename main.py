@@ -63,8 +63,8 @@ def load_database():
 def save_database(db):
     """ Saves the database to JSON file. """
     with open(DATABASE_FILE, 'w') as f:
+        # FIX: json.dump argument corrected to (db, f) to save data to the file object
         json.dump(db, f, indent=4) 
-        # FIX: json.dump argument corrected from (db, db) to (db, f)
 
 
 def generate_short_id(db):
@@ -114,6 +114,7 @@ def create_deep_link_and_send(chat_id, content_data):
 
     except Exception as e:
         print(f"Error generating Deep Link: {e}")
+        # Updated Error Message from previous failed attempts
         bot.send_message(
             chat_id,
             "❌ <b>Error:</b> Failed to generate Deep Link. Please check the console.",
@@ -148,7 +149,7 @@ def schedule_deletion(chat_id, message_id_to_delete, delay_seconds, is_file=Fals
             
             # Send the confirmation message only when deleting the actual file message (is_file=True)
             if is_file:
-                # Updated confirmation message as requested: "This file is deleted due to 10 minutes time limit"
+                # Confirmation message after deletion
                 confirmation_msg = bot.send_message(
                     chat_id,
                     "**🚨 File Deleted: This file is deleted due to the 10-minute time limit.**",
@@ -351,6 +352,7 @@ def handle_file_upload(message):
 
         file_id = None
 
+        # Check for files
         if message.document:
             file_id = message.document.file_id
         elif message.video:
@@ -358,18 +360,26 @@ def handle_file_upload(message):
         elif message.photo:
             file_id = message.photo[-1].file_id
 
+        # If a file is found, ask for caption
         if file_id:
             bot.send_message(
                 ADMIN_ID,
                 "📝 <b>Caption Required:</b> Please send the text (Caption) you want to attach to this content. <i>You can include @usernames, and the entire caption will be automatically made BOLD.</i>",
                 parse_mode='HTML')
+            # Register next step for caption input
             bot.register_next_step_handler(message, handle_caption_input, file_id)
 
+        # If no file is found (but perhaps a text message or unexpected forward)
         else:
+            # Check if the message was forwarded (file forward might not contain a file ID immediately, but we ignore non-files)
+            if message.forward_from or message.forward_from_chat:
+                pass # This is often ignored or handled differently; we stick to direct file check.
+
             bot.send_message(
                 ADMIN_ID,
                 "❌ <b>Error:</b> No file (MKV/Video/Document) detected. Please ensure you <b>upload it directly or forward a message that contains an actual file</b>. Send the file again.",
                 parse_mode='HTML')
+            # Re-register next step for file upload
             bot.register_next_step_handler(message, handle_file_upload)
     except Exception as e:
         print(f"Error in handle_file_upload: {e}")
@@ -381,9 +391,11 @@ def handle_caption_input(message, file_id):
         if message.chat.id != ADMIN_ID:
             return
 
-        caption_text = message.text.strip() if message.text else ""
+        # Use an empty string if message.text is None, preventing crashes
+        caption_text = message.text.strip() if message.text else "No Caption Provided" 
 
         if not message.text:
+            # If the user sent something that isn't text (like a sticker), handle it
             bot.send_message(
                 ADMIN_ID,
                 "❌ <b>Error:</b> Caption was not detected as text. Please send the caption text again.",
@@ -391,10 +403,12 @@ def handle_caption_input(message, file_id):
             bot.register_next_step_handler(message, handle_caption_input, file_id)
             return
 
+        # Automatically wrap the caption in HTML bold tags
         auto_bold_caption = f"<b>{caption_text}</b>"
 
         content_data = {'file_id': file_id, 'caption': auto_bold_caption}
 
+        # Final function call to save to DB and send link
         create_deep_link_and_send(ADMIN_ID, content_data)
     except Exception as e:
         print(f"Error in handle_caption_input: {e}")
@@ -407,12 +421,16 @@ def handle_caption_input(message, file_id):
 def handle_text_messages(message):
     try:
         chat_id = message.chat.id
-        # text = message.text.strip() # Not used in this version
-
-        bot.send_message(
-            chat_id,
-            "🤖 <b>I'm an automated bot.</b> Please use a Deep Link from one of our channels or send /start to see my welcome message. ✨",
-            parse_mode='HTML')
+        # This handler catches any text that wasn't handled by a command or a next_step_handler
+        
+        # We only send this message if the chat is not the Admin chat where commands are expected
+        if chat_id != ADMIN_ID:
+            bot.send_message(
+                chat_id,
+                "🤖 <b>I'm an automated bot.</b> Please use a Deep Link from one of our channels or send /start to see my welcome message. ✨",
+                parse_mode='HTML')
+        # Admin text messages are generally ignored if not part of a flow.
+        
     except Exception as e:
         print(f"Error in handle_text_messages: {e}")
 
@@ -506,32 +524,4 @@ def index():
         return 'Internal Server Error', 500 
 
 
-def run_bot():
-    print("Starting Polling for updates...")
-    while True: 
-        try:
-            # Added long_polling_timeout=30 for better resilience against network issues
-            bot.polling(timeout=30, 
-                        skip_pending=True,
-                        non_stop=True,
-                        long_polling_timeout=30) 
-        except Exception as e:
-            # Restarts the polling loop on a fatal error, but keeps the Flask server alive.
-            print(f"🚨 FATAL POLLING ERROR: {e}. Restarting polling loop in 5 seconds...")
-            time.sleep(5) 
-
-if __name__ == '__main__':
-    print("✅ Bot Initialization Successful.")
-    
-    # 1. Start the Polling Thread (for Telegram updates)
-    polling_thread = threading.Thread(target=run_bot)
-    polling_thread.daemon = True
-    polling_thread.start()
-    
-    # 2. Start the Keep-Alive Thread (to prevent sleeping)
-    keep_alive_thread = threading.Thread(target=keep_alive)
-    keep_alive_thread.daemon = True
-    keep_alive_thread.start()
-
-    # 3. Start the Flask Server (This keeps the Render URL alive)
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+def run_bot()
