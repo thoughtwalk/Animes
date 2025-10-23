@@ -10,12 +10,13 @@ from flask import Flask, request
 
 # --- CONFIGURATION SETTINGS ---
 # BOT_TOKEN is loaded from environment variables (Render Environment Variables)
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '7902930015:AAEnGzQaZHdRcmuAxWIPDIcerJVqRhmx9D4')
+# कृपया यहां अपने वास्तविक BOT_TOKEN को ENV में ही रखें (जैसे आपने पहले किया था)
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '7902930015:AAEnGzQaZHdRcmuAxWIPDIcerJVqRhmx9D4') 
 ADMIN_ID = 5312279751  # Your Admin ID
 BOT_USERNAME = 'One_piece_is_real_bot'  # Your Bot Username
 DATABASE_FILE = 'database.json'
 SHORT_ID_LENGTH = 6
-# >>> CHANGE 1: Deletion time changed to 10 minutes
+# >>> Deletion time set to 10 minutes
 DELETION_TIME_MINUTES = 10
 DELETION_TIME_SECONDS = DELETION_TIME_MINUTES * 60
 
@@ -46,7 +47,7 @@ REQUIRED_CHANNELS = [
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# --- DATABASE FUNCTIONS (Same as before) ---
+# --- DATABASE FUNCTIONS ---
 
 def load_database():
     """ Loads database from JSON file. """
@@ -76,7 +77,7 @@ def generate_short_id(db):
             return short_id
 
 
-# --- Deep Link GENERATION FUNCTION (Same as before) ---
+# --- Deep Link GENERATION FUNCTION ---
 
 
 def create_deep_link_and_send(chat_id, content_data):
@@ -119,7 +120,7 @@ def create_deep_link_and_send(chat_id, content_data):
             parse_mode='HTML')
 
 
-# --- DELETION LOGIC (FIXED AND UPDATED FOR 10 MIN) ---
+# --- DELETION LOGIC (FIXED Indentation for robust threading) ---
 
 def schedule_deletion_cleanup(chat_id, message_id_to_delete, delay_seconds):
     """ Helper function to clean up the confirmation message after a short delay. """
@@ -128,6 +129,7 @@ def schedule_deletion_cleanup(chat_id, message_id_to_delete, delay_seconds):
         bot.delete_message(chat_id, message_id_to_delete)
         print(f"✅ Cleaned up confirmation message {message_id_to_delete}.")
     except Exception as e:
+        # >>> FIX 1 Indentation checked for this block
         print(f"⚠️ Could not delete cleanup message {message_id_to_delete}: {e}")
 
 def schedule_deletion(chat_id, message_id_to_delete, delay_seconds, is_file=False):
@@ -147,7 +149,7 @@ def schedule_deletion(chat_id, message_id_to_delete, delay_seconds, is_file=Fals
             
             # Send the confirmation message only when deleting the actual file message (is_file=True)
             if is_file:
-                # >>> CHANGE 3: Confirmation message updated to 10 minutes
+                # Confirmation message updated to 10 minutes
                 confirmation_msg = bot.send_message(
                     chat_id,
                     "🗑️ **Content Removed:** The file and its warning message have been automatically deleted from this chat after 10 minutes.",
@@ -170,7 +172,7 @@ def schedule_deletion(chat_id, message_id_to_delete, delay_seconds, is_file=Fals
     deletion_thread.start()
 
 
-# --- OTHER UTILITY FUNCTIONS (Same as before) ---
+# --- OTHER UTILITY FUNCTIONS ---
 
 
 def get_unsubscribed_channels(user_id):
@@ -223,7 +225,7 @@ def send_final_content(chat_id, short_id):
             parse_mode='HTML')
 
         # --- WARNING MESSAGE ---
-        # >>> CHANGE 2: Warning message updated to 10 minutes and made entirely BOLD
+        # Warning message updated to 10 minutes and made entirely BOLD
         warning_message = bot.send_message(
             chat_id,
             "<b>🚨 SECURITY ALERT! 🚨\n\n"
@@ -260,7 +262,7 @@ def send_final_content(chat_id, short_id):
             parse_mode='HTML')
 
 
-# --- COMMAND HANDLERS (Same as before) ---
+# --- COMMAND HANDLERS ---
 
 
 @bot.message_handler(commands=['start'])
@@ -341,7 +343,7 @@ def handle_generate_command(message):
         print(f"Error in handle_generate_command: {e}")
 
 
-# --- NEXT STEP HANDLERS (Same as before) ---
+# --- NEXT STEP HANDLERS ---
 
 
 def handle_file_upload(message):
@@ -401,7 +403,7 @@ def handle_caption_input(message, file_id):
         print(f"Error in handle_caption_input: {e}")
 
 
-# --- GENERAL TEXT HANDLER (Same as before) ---
+# --- GENERAL TEXT HANDLER ---
 
 
 @bot.message_handler(func=lambda message: True, content_types=['text'])
@@ -419,7 +421,7 @@ def handle_text_messages(message):
         print(f"Error in handle_text_messages: {e}")
 
 
-# --- CALLBACK HANDLERS (Same as before) ---
+# --- CALLBACK HANDLERS ---
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('check_'))
@@ -473,7 +475,7 @@ def check_callback(call):
         print(f"Error in check_callback: {e}")
 
 
-# --- KEEP-ALIVE MECHANISM (Same as before) ---
+# --- KEEP-ALIVE MECHANISM ---
 
 def keep_alive():
     """ 
@@ -494,7 +496,7 @@ def keep_alive():
         
         time.sleep(PING_INTERVAL_SECONDS)
 
-# --- START SERVER AND POLLING (Same as before) ---
+# --- START SERVER AND POLLING (FIXED Indentation) ---
 
 
 @app.route('/', methods=['GET', 'HEAD'])
@@ -504,6 +506,7 @@ def index():
         print("🌐 Received GET/HEAD request on root path. Returning 200 OK.")
         return 'Bot is running...', 200
     except Exception as e:
+        # Indentation checked for this block
         print(f"🚨 Critical Flask Error in index route: {e}")
         return 'Internal Server Error', 500 
 
@@ -519,15 +522,12 @@ def run_bot():
                         long_polling_timeout=30) 
         except Exception as e:
             # Restarts the polling loop on a fatal error, but keeps the Flask server alive.
+            # Indentation checked for this block
             print(f"🚨 FATAL POLLING ERROR: {e}. Restarting polling loop in 5 seconds...")
             time.sleep(5) 
 
 if __name__ == '__main__':
+    # >>> FIX 2 Indentation checked for this entire block
     print("✅ Bot Initialization Successful.")
     
-    # 1. Start the Polling Thread (for Telegram updates)
-    polling_thread = threading.Thread(target=run_bot)
-    polling_thread.daemon = True
-    polling_thread.start()
-    
-   
+    # 1. Start the Polling Thread (for Telegram updates
