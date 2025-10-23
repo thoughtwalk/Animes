@@ -499,7 +499,6 @@ def keep_alive():
 def index():
     # Ensures the root path always returns 200 OK for UptimeRobot
     try:
-        # print("🌐 Received GET/HEAD request on root path. Returning 200 OK.") # Commented out for cleaner logs
         return 'Bot is running...', 200
     except Exception as e:
         print(f"🚨 Critical Flask Error in index route: {e}")
@@ -533,4 +532,5 @@ if __name__ == '__main__':
     keep_alive_thread.daemon = True
     keep_alive_thread.start()
 
-    # 3. Start the Flask Server (This keeps the Render U
+    # 3. Start the Flask Server (This keeps the Render URL alive)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
