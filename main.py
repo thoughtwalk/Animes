@@ -10,13 +10,13 @@ from flask import Flask, request
 
 # --- CONFIGURATION SETTINGS ---
 # BOT_TOKEN is loaded from environment variables (Render Environment Variables)
-# कृपया यहां अपने वास्तविक BOT_TOKEN को ENV में ही रखें (जैसे आपने पहले किया था)
+# कृपया यहां अपने वास्तविक BOT_TOKEN को ENV में ही रखें
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '7902930015:AAEnGzQaZHdRcmuAxWIPDIcerJVqRhmx9D4') 
 ADMIN_ID = 5312279751  # Your Admin ID
 BOT_USERNAME = 'One_piece_is_real_bot'  # Your Bot Username
 DATABASE_FILE = 'database.json'
 SHORT_ID_LENGTH = 6
-# >>> Deletion time set to 10 minutes
+# >>> Deletion time set to 10 minutes (600 seconds)
 DELETION_TIME_MINUTES = 10
 DELETION_TIME_SECONDS = DELETION_TIME_MINUTES * 60
 
@@ -120,22 +120,21 @@ def create_deep_link_and_send(chat_id, content_data):
             parse_mode='HTML')
 
 
-# --- DELETION LOGIC (FIXED Indentation for robust threading) ---
+# --- DELETION LOGIC ---
 
 def schedule_deletion_cleanup(chat_id, message_id_to_delete, delay_seconds):
-    """ Helper function to clean up the confirmation message after a short delay. """
+    """ Helper function to clean up the confirmation message after a short delay (e.g., 5 minutes). """
     time.sleep(delay_seconds)
     try:
         bot.delete_message(chat_id, message_id_to_delete)
         print(f"✅ Cleaned up confirmation message {message_id_to_delete}.")
     except Exception as e:
-        # >>> FIX 1 Indentation checked for this block
         print(f"⚠️ Could not delete cleanup message {message_id_to_delete}: {e}")
 
 def schedule_deletion(chat_id, message_id_to_delete, delay_seconds, is_file=False):
     """
     Schedules the deletion of a specific message after a given delay 
-    using a background thread, with robust error handling.
+    using a background thread.
     """
 
     def delete_message_thread():
@@ -149,18 +148,18 @@ def schedule_deletion(chat_id, message_id_to_delete, delay_seconds, is_file=Fals
             
             # Send the confirmation message only when deleting the actual file message (is_file=True)
             if is_file:
-                # Confirmation message updated to 10 minutes
+                # Confirmation message updated to reflect 10 minutes deletion
                 confirmation_msg = bot.send_message(
                     chat_id,
                     "🗑️ **Content Removed:** The file and its warning message have been automatically deleted from this chat after 10 minutes.",
                     parse_mode='Markdown'
                 )
-                # Schedule the confirmation message itself to be deleted after a short time (e.g., 5 minutes = 300 seconds)
+                # Schedule the confirmation message itself to be deleted after 5 minutes (300 seconds)
                 threading.Thread(target=schedule_deletion_cleanup, 
                                  args=(chat_id, confirmation_msg.message_id, 5 * 60)).start()
 
         except telebot.apihelper.ApiException as e:
-            # Ignore "Message to delete not found" (which happens if user deletes it first)
+            # Ignore "Message to delete not found" 
             if 'message to delete not found' not in str(e):
                 print(f"⚠️ Could not delete message {message_id_to_delete} in chat {chat_id}: {e}")
         except Exception as e:
@@ -185,7 +184,6 @@ def get_unsubscribed_channels(user_id):
             if member.status not in ['member', 'administrator', 'creator']:
                 unsubscribed_channels.append(channel)
         except telebot.apihelper.ApiException as e:
-            # Handles API errors robustly.
             if 'user not found' in str(e) or 'Bad Request: chat not found' in str(e):
                 unsubscribed_channels.append(channel)
             else:
@@ -193,7 +191,6 @@ def get_unsubscribed_channels(user_id):
                 print(f"⚠️ Telegram API Error in get_unsubscribed_channels for {channel['name']}: {e}")
                 unsubscribed_channels.append(channel) 
         except Exception:
-            # For network or other unexpected errors
             unsubscribed_channels.append(channel)
     return unsubscribed_channels
 
@@ -410,13 +407,12 @@ def handle_caption_input(message, file_id):
 def handle_text_messages(message):
     try:
         chat_id = message.chat.id
-        text = message.text.strip()
+        # text = message.text.strip() # Not used in this version
 
-        if not text.startswith('/'):
-            bot.send_message(
-                chat_id,
-                "🤖 <b>I'm an automated bot.</b> Please use a Deep Link from one of our channels or send /start to see my welcome message. ✨",
-                parse_mode='HTML')
+        bot.send_message(
+            chat_id,
+            "🤖 <b>I'm an automated bot.</b> Please use a Deep Link from one of our channels or send /start to see my welcome message. ✨",
+            parse_mode='HTML')
     except Exception as e:
         print(f"Error in handle_text_messages: {e}")
 
@@ -489,7 +485,7 @@ def keep_alive():
         try:
             # We ping the Render URL to keep it awake
             requests.get(RENDER_PUBLIC_URL, timeout=10)
-            print(f"🚀 Keep-Alive Ping Sent to {RENDER_PUBLIC_URL}. Timer reset.")
+            # print(f"🚀 Keep-Alive Ping Sent to {RENDER_PUBLIC_URL}. Timer reset.") # Commented out for cleaner logs
         except Exception as e:
             # If the ping fails, log the error but keep the thread alive
             print(f"⚠️ Keep-Alive Error (Pinging Render URL): {e}. Trying again soon.")
@@ -503,10 +499,9 @@ def keep_alive():
 def index():
     # Ensures the root path always returns 200 OK for UptimeRobot
     try:
-        print("🌐 Received GET/HEAD request on root path. Returning 200 OK.")
+        # print("🌐 Received GET/HEAD request on root path. Returning 200 OK.") # Commented out for cleaner logs
         return 'Bot is running...', 200
     except Exception as e:
-        # Indentation checked for this block
         print(f"🚨 Critical Flask Error in index route: {e}")
         return 'Internal Server Error', 500 
 
@@ -522,12 +517,20 @@ def run_bot():
                         long_polling_timeout=30) 
         except Exception as e:
             # Restarts the polling loop on a fatal error, but keeps the Flask server alive.
-            # Indentation checked for this block
             print(f"🚨 FATAL POLLING ERROR: {e}. Restarting polling loop in 5 seconds...")
             time.sleep(5) 
 
 if __name__ == '__main__':
-    # >>> FIX 2 Indentation checked for this entire block
     print("✅ Bot Initialization Successful.")
     
-    # 1. Start the Polling Thread (for Telegram updates
+    # 1. Start the Polling Thread (for Telegram updates)
+    polling_thread = threading.Thread(target=run_bot)
+    polling_thread.daemon = True
+    polling_thread.start()
+    
+    # 2. Start the Keep-Alive Thread (to prevent sleeping)
+    keep_alive_thread = threading.Thread(target=keep_alive)
+    keep_alive_thread.daemon = True
+    keep_alive_thread.start()
+
+    # 3. Start the Flask Server (This keeps the Render U
