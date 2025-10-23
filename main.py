@@ -63,8 +63,8 @@ def load_database():
 def save_database(db):
     """ Saves the database to JSON file. """
     with open(DATABASE_FILE, 'w') as f:
-        json.dump(db, f, indent=4) # <-- FIX: Changed 'db' to 'f' here
-        # Note: This change fixes the 'Failed to generate Deep Link' error.
+        json.dump(db, f, indent=4) 
+        # FIX: json.dump argument corrected from (db, db) to (db, f)
 
 
 def generate_short_id(db):
@@ -534,4 +534,4 @@ if __name__ == '__main__':
     keep_alive_thread.start()
 
     # 3. Start the Flask Server (This keeps the Render URL alive)
-    app.run(h
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
