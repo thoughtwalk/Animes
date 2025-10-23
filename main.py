@@ -371,10 +371,6 @@ def handle_file_upload(message):
 
         # If no file is found (but perhaps a text message or unexpected forward)
         else:
-            # Check if the message was forwarded (file forward might not contain a file ID immediately, but we ignore non-files)
-            if message.forward_from or message.forward_from_chat:
-                pass # This is often ignored or handled differently; we stick to direct file check.
-
             bot.send_message(
                 ADMIN_ID,
                 "❌ <b>Error:</b> No file (MKV/Video/Document) detected. Please ensure you <b>upload it directly or forward a message that contains an actual file</b>. Send the file again.",
@@ -524,4 +520,31 @@ def index():
         return 'Internal Server Error', 500 
 
 
-def run_bot()
+def run_bot():
+    print("Starting Polling for updates...")
+    while True: 
+        try:
+            # Added long_polling_timeout=30 for better resilience against network issues
+            bot.polling(timeout=30, 
+                        skip_pending=True,
+                        non_stop=True,
+                   # Restarts the polling loop on a fatal error, but keeps the Flask server alive.
+        print(f"🚨 FATAL POLLING ERROR: {e}. Restarting polling loop in 5 seconds...")
+        time.sleep(5) 
+
+if __name__ == '__main__':
+    print("✅ Bot Initialization Successful.")
+    
+    # 1. Start the Polling Thread (for Telegram updates)
+    polling_thread = threading.Thread(target=run_bot)
+    polling_thread.daemon = True
+    polling_thread.start()
+    
+    # 2. Start the Keep-Alive Thread (to prevent sleeping)
+    keep_alive_thread = threading.Thread(target=keep_alive)
+    keep_alive_thread.daemon = True
+    keep_alive_thread.start()
+
+    # 3. Start the Flask Server (This keeps the Render URL alive)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    
