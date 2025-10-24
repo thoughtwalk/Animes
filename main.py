@@ -44,6 +44,11 @@ REQUIRED_CHANNELS = [
     },
 ]
 
+# --- GLOBAL STATE FOR MULTI-FILE GENERATION ---
+# Stores temporary data for an admin's current deep link generation session.
+# Format: {admin_id: {'files': [{'file_id': '...', 'caption': '...'}, ...], 'is_grouping': True/False, 'current_file_id': '...'}}
+ADMIN_STATE = {}
+
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
@@ -77,32 +82,38 @@ def generate_short_id(db):
             return short_id
 
 
-# --- Deep Link GENERATION FUNCTION ---
+# --- Deep Link GENERATION FUNCTION (UPDATED FOR MULTIPLE FILES) ---
 
 
-def create_deep_link_and_send(chat_id, content_data):
+def create_deep_link_and_send(chat_id, file_list):
     """
-    Saves the file ID and caption to the database and generates a short Deep Link.
+    Saves the list of file IDs and captions to the database and generates a short Deep Link.
+    file_list is a list of dictionaries: [{'file_id': ..., 'caption': ...}, ...]
     """
     try:
         db = load_database()
         short_id = generate_short_id(db)
-
-        db[short_id] = content_data
+        
+        # Save the list of files, not just one file
+        db[short_id] = {'files': file_list, 'type': 'group' if len(file_list) > 1 else 'single'}
         save_database(db)
 
         deep_link = f"https://t.me/{BOT_USERNAME}?start={short_id}"
-
+        
         markup = telebot.types.InlineKeyboardMarkup()
         markup.add(
             telebot.types.InlineKeyboardButton(
                 "🚀 Click Here to View Content! 🚀", url=deep_link))
 
+        # Preview content depends on whether it's a single file or a group
+        preview_caption = file_list[0].get('caption', 'None')
+        content_type = f"{len(file_list)} Files (MKV/Video)" if len(file_list) > 1 else "Telegram File (MKV/Video)"
+
         bot.send_message(
             chat_id,
             f"✅ <b>Deep Link Generated Successfully!</b>\n\n"
-            f"<b>Content Type:</b> <code>Telegram File (MKV/Video)</code>\n"
-            f"<b>Attached Caption (Preview):</b> \n<code>{content_data.get('caption', 'None')}</code>\n\n"
+            f"<b>Content Type:</b> <code>{content_type}</code>\n"
+            f"<b>Attached Caption (Preview):</b> \n<code>{preview_caption}</code>\n\n"
             f"This link is <b>short</b> and <b>fully functional</b>.\n\n"
             f"Use the button below in your channel post:",
             parse_mode='HTML', 
@@ -111,6 +122,10 @@ def create_deep_link_and_send(chat_id, content_data):
         bot.send_message(chat_id,
                          f"🔗 Deep Link URL: <code>{deep_link}</code>",
                          parse_mode='HTML')
+        
+        # Clear admin state after successful creation
+        if chat_id in ADMIN_STATE:
+             del ADMIN_STATE[chat_id]
 
     except Exception as e:
         print(f"Error generating Deep Link: {e}")
@@ -135,6 +150,8 @@ def schedule_deletion(chat_id, message_id_to_delete, delay_seconds, is_file=Fals
     """
     Schedules the deletion of a specific message after a given delay 
     using a background thread.
+    
+    is_file=True is only set for the *last* file message to trigger the cleanup confirmation.
     """
 
     def delete_message_thread():
@@ -146,12 +163,12 @@ def schedule_deletion(chat_id, message_id_to_delete, delay_seconds, is_file=Fals
             bot.delete_message(chat_id, message_id_to_delete)
             print(f"✅ Successfully deleted message {message_id_to_delete} in chat {chat_id} (is_file: {is_file}).")
             
-            # Send the confirmation message only when deleting the actual file message (is_file=True)
+            # Send the confirmation message only when deleting the actual *last* file message (is_file=True)
             if is_file:
                 # Confirmation message updated to reflect 10 minutes deletion
                 confirmation_msg = bot.send_message(
                     chat_id,
-                    "🗑️ **Content Removed:** The file and its warning message have been automatically deleted from this chat after 10 minutes.",
+                    "🗑️ **Content Removed:** The file(s) and its warning message have been automatically deleted from this chat after 10 minutes.",
                     parse_mode='Markdown'
                 )
                 # Schedule the confirmation message itself to be deleted after 5 minutes (300 seconds)
@@ -195,69 +212,68 @@ def get_unsubscribed_channels(user_id):
     return unsubscribed_channels
 
 
-# --- send_final_content() (UPDATED Warning Message) ---
+# --- send_final_content() (UPDATED to handle multiple files) ---
 
 
 def send_final_content(chat_id, short_id):
     """
-    Retrieves the content data and sends the file with the associated caption 
-    and schedules it for deletion. 
+    Retrieves the content data (which may contain multiple files) and sends them, 
+    scheduling all for deletion. 
     """
     try:
         db = load_database()
         content_data = db.get(short_id)
 
-        if not content_data or 'file_id' not in content_data:
-            raise ValueError(
-                "Content data or File ID not found in the database.")
+        # Check for group files list
+        file_list = content_data.get('files') if content_data and 'files' in content_data else None
 
-        file_id = content_data['file_id']
-        caption = content_data.get(
-            'caption',
-            None)  
+        if not file_list:
+            # Handle possible old structure or corrupted data
+            raise ValueError("Content data or File list not found in the database.")
 
         bot.send_message(
             chat_id,
-            "✅ <b>Verification Successful!</b> Fetching your file now...",
+            "✅ <b>Verification Successful!</b> Fetching your file(s) now...",
             parse_mode='HTML')
 
         # --- WARNING MESSAGE ---
-        # Warning message updated to 10 minutes and made entirely BOLD
         warning_message = bot.send_message(
             chat_id,
             "<b>🚨 SECURITY ALERT! 🚨\n\n"
-            "This file will be automatically deleted from this chat in 10 minutes.\n\n"
+            "This file(s) will be automatically deleted from this chat in 10 minutes.\n\n"
             "To keep the content, please Forward it immediately to your Saved Messages or another private chat/channel. The link will expire after the deletion.</b>",
             parse_mode='HTML'
         )
 
-        # --- SEND FILE AND GET MESSAGE ID ---
-        file_message = bot.send_document(
-            chat_id,
-            file_id,
-            caption=
-            caption,  
-            parse_mode='HTML'
-        )
+        # --- SEND ALL FILES AND GET MESSAGE IDs ---
+        for i, file_data in enumerate(file_list):
+            file_message = bot.send_document(
+                chat_id,
+                file_data['file_id'],
+                caption=file_data.get('caption'),  
+                parse_mode='HTML'
+            )
+            # --- SCHEDULE DELETION ---
+            is_final_file = (i == len(file_list) - 1)
+            # Schedule all file messages for deletion. Only the LAST file's deletion
+            # will trigger the final confirmation message (is_file=True).
+            schedule_deletion(chat_id, file_message.message_id,
+                              DELETION_TIME_SECONDS, is_file=is_final_file)
 
-        # --- SCHEDULE DELETION ---
+
         # 1. Schedule the Warning message for deletion (is_file=False)
         schedule_deletion(chat_id, warning_message.message_id,
                           DELETION_TIME_SECONDS, is_file=False)
-                          
-        # 2. Schedule the actual File message for deletion (is_file=True)
-        #    This is the message whose deletion will trigger the final confirmation.
-        schedule_deletion(chat_id, file_message.message_id,
-                          DELETION_TIME_SECONDS, is_file=True)
+
 
     except Exception as e:
         # Prevents bot from crashing on invalid/expired file_id
         print(f"Error sending content or invalid link: {e}")
         bot.send_message(
             chat_id,
-            "❌ <b>Error:</b> This link is invalid or has expired.",
+            "❌ <b>Error:</b> This link is invalid or has expired or the file is too large/old.",
             parse_mode='HTML')
-    # --- COMMAND HANDLERS ---
+# --- COMMAND HANDLERS ---
 
 
 @bot.message_handler(commands=['start'])
@@ -273,11 +289,11 @@ def handle_start(message):
 
             welcome_text = (
                 "👋 <b>Welcome to your Anime Content Bot!</b> 🎬\n\n"
-                "My main purpose is to provide you with your favorite <b>Anime Content Files</b> (MKV/Videos/Documents).\n\n"
+                "My main purpose is to provide you with your favorite <b>Anime Content File(s)</b> (MKV/Videos/Documents).\n\n"
                 "To access the content, please follow these simple steps:\n"
                 "1️⃣ <b>Join our Channels</b> below and find the content you want to view.\n"
                 "2️⃣ Click the <b>button</b> provided beneath the content in the channel.\n"
-                "3️⃣ I will verify your joining and instantly deliver the file to you! ✅\n\n" 
+                "3️⃣ I will verify your joining and instantly deliver the file(s) to you! ✅\n\n" 
                 "<b>Thank you for choosing us!</b> Enjoy the content! ✨")
 
             markup = telebot.types.InlineKeyboardMarkup(row_width=1)
@@ -328,17 +344,51 @@ def handle_generate_command(message):
                 message.chat.id,
                 "❌ <b>Error:</b> This command is for the <b>Admin Only</b>.",
                 parse_mode='HTML')
+        
+        # Initialize the state for the admin
+        ADMIN_STATE[ADMIN_ID] = {'files': [], 'is_grouping': False}
+
+        markup = telebot.types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            telebot.types.InlineKeyboardButton("✅ Grouping Mode (Multiple Files)", callback_data="start_grouping"),
+            telebot.types.InlineKeyboardButton("➡️ Single File Mode", callback_data="start_single")
+        )
 
         bot.send_message(
             ADMIN_ID,
-            "✅ <b>Deep Link Generation Mode (File):</b> Please send the file (Video, MKV, or any Document) for which you want to generate a <b>Short Deep Link</b>. <i>Note: The caption will automatically be formatted as BOLD.</i>",
-            parse_mode='HTML')
-        bot.register_next_step_handler(message, handle_file_upload)
+            "🎬 <b>Deep Link Generation Mode:</b>\n\n"
+            "Would you like to generate a link for a <b>Single File</b> or for a <b>Group of Files</b>?",
+            parse_mode='HTML',
+            reply_markup=markup
+        )
     except Exception as e:
         print(f"Error in handle_generate_command: {e}")
 
 
-# --- NEXT STEP HANDLERS ---
+# New Callback Handler to start the process
+@bot.callback_query_handler(func=lambda call: call.data in ["start_grouping", "start_single"])
+def handle_start_mode_callback(call):
+    try:
+        admin_id = call.message.chat.id
+        mode = call.data
+        
+        bot.delete_message(admin_id, call.message.message_id) # Clean up the mode selection message
+
+        if mode == "start_grouping":
+            ADMIN_STATE[admin_id]['is_grouping'] = True
+            prompt = "✅ <b>Grouping Mode Activated!</b>\n\nPlease send the <b>FIRST</b> file (Video, MKV, or any Document) for the group."
+        else:
+            ADMIN_STATE[admin_id]['is_grouping'] = False
+            prompt = "➡️ <b>Single File Mode Activated!</b>\n\nPlease send the file (Video, MKV, or any Document)."
+        
+        bot.send_message(admin_id, prompt, parse_mode='HTML')
+        bot.register_next_step_handler(call.message, handle_file_upload)
+        
+    except Exception as e:
+        print(f"Error in handle_start_mode_callback: {e}")
+
+
+# --- NEXT STEP HANDLERS (UPDATED for Grouping) ---
 
 
 def handle_file_upload(message):
@@ -347,37 +397,54 @@ def handle_file_upload(message):
         if message.chat.id != ADMIN_ID:
             return
 
+        admin_id = message.chat.id
+        
+        # Check if the state is valid
+        if admin_id not in ADMIN_STATE:
+             return bot.send_message(admin_id, "❌ <b>Error:</b> Generation session expired. Please start again with /generate.", parse_mode='HTML')
+        
         file_id = None
-
+        file_name = "File"
+        
+        # Prioritize documents (MKV, etc.) then video
         if message.document:
             file_id = message.document.file_id
+            file_name = message.document.file_name or "Document File"
         elif message.video:
             file_id = message.video.file_id
+            file_name = message.video.file_name or "Video File"
         elif message.photo:
             file_id = message.photo[-1].file_id
+            file_name = "Photo File"
 
         if file_id:
-            bot.send_message(
-                ADMIN_ID,
-                "📝 <b>Caption Required:</b> Please send the text (Caption) you want to attach to this content. <i>You can include @usernames, and the entire caption will be automatically made BOLD.</i>",
-                parse_mode='HTML')
-            bot.register_next_step_handler(message, handle_caption_input, file_id)
+            ADMIN_STATE[admin_id]['current_file_id'] = file_id # Temporarily store the ID
+            
+            prompt = f"📝 <b>Caption Required</b> for <code>{file_name}</code>:\n\nPlease send the text (Caption) you want to attach to this content. <i>It will be automatically made BOLD.</i>"
+            bot.send_message(admin_id, prompt, parse_mode='HTML')
+            bot.register_next_step_handler(message, handle_caption_input)
 
         else:
             bot.send_message(
-                ADMIN_ID,
-                "❌ <b>Error:</b> No file (MKV/Video/Document) detected. Please ensure you <b>upload it directly or forward a message that contains an actual file</b>. Send the file again.",
+                admin_id,
+                "❌ <b>Error:</b> No file (MKV/Video/Document) detected. Please send an actual file directly.",
                 parse_mode='HTML')
             bot.register_next_step_handler(message, handle_file_upload)
+            
     except Exception as e:
         print(f"Error in handle_file_upload: {e}")
 
 
-def handle_caption_input(message, file_id):
-    """ Captures the caption, automatically makes it BOLD (using HTML <b>), and generates the final deep link. """
+def handle_caption_input(message):
+    """ Captures the caption, saves the file+caption, and asks for the next step (add more or finish). """
     try:
         if message.chat.id != ADMIN_ID:
             return
+
+        admin_id = message.chat.id
+        if admin_id not in ADMIN_STATE or 'current_file_id' not in ADMIN_STATE[admin_id]:
+             return bot.send_message(admin_id, "❌ <b>Error:</b> Session expired or file ID missing. Please restart with /generate.", parse_mode='HTML')
+
 
         caption_text = message.text.strip() if message.text else ""
 
@@ -386,33 +453,76 @@ def handle_caption_input(message, file_id):
                 ADMIN_ID,
                 "❌ <b>Error:</b> Caption was not detected as text. Please send the caption text again.",
                 parse_mode='HTML')
-            bot.register_next_step_handler(message, handle_caption_input, file_id)
+            bot.register_next_step_handler(message, handle_caption_input)
             return
 
         auto_bold_caption = f"<b>{caption_text}</b>"
-
-        content_data = {'file_id': file_id, 'caption': auto_bold_caption}
-
-        create_deep_link_and_send(ADMIN_ID, content_data)
+        
+        # Add the completed file to the list
+        file_data = {'file_id': ADMIN_STATE[admin_id]['current_file_id'], 'caption': auto_bold_caption}
+        ADMIN_STATE[admin_id]['files'].append(file_data)
+        
+        # Clean up temporary ID
+        del ADMIN_STATE[admin_id]['current_file_id']
+        
+        
+        # Check if the process is a single file or a group
+        if ADMIN_STATE[admin_id]['is_grouping']:
+            # If grouping, ask to add more or finish
+            current_count = len(ADMIN_STATE[admin_id]['files'])
+            
+            markup = telebot.types.InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                telebot.types.InlineKeyboardButton("➕ Add Another File", callback_data="add_another"),
+                telebot.types.InlineKeyboardButton("✅ Finish & Generate Link", callback_data="finish_grouping")
+            )
+            
+            bot.send_message(
+                admin_id,
+                f"✅ <b>File #{current_count} Added!</b>\n\nWhat would you like to do next?",
+                parse_mode='HTML',
+                reply_markup=markup
+            )
+        else:
+            # If single file, generate link immediately
+            # create_deep_link_and_send will clear the state
+            create_deep_link_and_send(ADMIN_ID, ADMIN_STATE[admin_id]['files'])
+            
     except Exception as e:
         print(f"Error in handle_caption_input: {e}")
 
 
-# --- GENERAL TEXT HANDLER ---
-
-
-@bot.message_handler(func=lambda message: True, content_types=['text'])
-def handle_text_messages(message):
+# New Callback Handler for Grouping options
+@bot.callback_query_handler(func=lambda call: call.data in ["add_another", "finish_grouping"])
+def handle_grouping_options_callback(call):
     try:
-        chat_id = message.chat.id
-        # text = message.text.strip() # Not used in this version
+        admin_id = call.message.chat.id
+        bot.delete_message(admin_id, call.message.message_id) # Clean up previous message
 
-        bot.send_message(
-            chat_id,
-            "🤖 <b>I'm an automated bot.</b> Please use a Deep Link from one of our channels or send /start to see my welcome message. ✨",
-            parse_mode='HTML')
+        if admin_id not in ADMIN_STATE:
+             return bot.send_message(admin_id, "❌ <b>Error:</b> Session expired. Please restart with /generate.", parse_mode='HTML')
+
+        if call.data == "add_another":
+            # Go back to file upload step for the next file
+            count = len(ADMIN_STATE[admin_id]['files']) + 1
+            bot.send_message(
+                admin_id, 
+                f"Please send <b>File #{count}</b> (Video, MKV, or any Document) now.", 
+                parse_mode='HTML'
+            )
+            bot.register_next_step_handler(call.message, handle_file_upload)
+            
+        elif call.data == "finish_grouping":
+            # Finalize the group link
+            if not ADMIN_STATE[admin_id]['files']:
+                return bot.send_message(admin_id, "❌ <b>Error:</b> No files were added to the group. Please restart with /generate.", parse_mode='HTML')
+                
+            bot.send_message(admin_id, "🔄 <b>Generating Deep Link...</b> Please wait.", parse_mode='HTML')
+            # create_deep_link_and_send will clear the state
+            create_deep_link_and_send(ADMIN_ID, ADMIN_STATE[admin_id]['files'])
+            
     except Exception as e:
-        print(f"Error in handle_text_messages: {e}")
+        print(f"Error in handle_grouping_options_callback: {e}")
 
 
 # --- CALLBACK HANDLERS ---
@@ -434,7 +544,7 @@ def check_callback(call):
         if not unsubscribed_channels:
             
             bot.edit_message_text(
-                "✅ <b>Verification Successful!</b> Sending your file now... 🚀",
+                "✅ <b>Verification Successful!</b> Sending your file(s) now... 🚀",
                 chat_id,
                 message_id,
                 parse_mode='HTML'  
@@ -469,6 +579,23 @@ def check_callback(call):
         print(f"Error in check_callback: {e}")
 
 
+# --- GENERAL TEXT HANDLER ---
+
+
+@bot.message_handler(func=lambda message: True, content_types=['text'])
+def handle_text_messages(message):
+    try:
+        chat_id = message.chat.id
+        # text = message.text.strip() # Not used in this version
+
+        bot.send_message(
+            chat_id,
+            "🤖 <b>I'm an automated bot.</b> Please use a Deep Link from one of our channels or send /start to see my welcome message. ✨",
+            parse_mode='HTML')
+    except Exception as e:
+        print(f"Error in handle_text_messages: {e}")
+
+
 # --- KEEP-ALIVE MECHANISM ---
 
 def keep_alive():
@@ -490,7 +617,7 @@ def keep_alive():
         
         time.sleep(PING_INTERVAL_SECONDS)
 
-# --- START SERVER AND POLLING (FIXED Indentation) ---
+# --- START SERVER AND POLLING ---
 
 
 @app.route('/', methods=['GET', 'HEAD'])
@@ -532,3 +659,4 @@ if __name__ == '__main__':
 
     # 3. Start the Flask Server (This keeps the Render URL alive)
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+            
