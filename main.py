@@ -14,8 +14,7 @@ from flask import Flask, request
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '7902930015:AAEnGzQaZHdRcmuAxWIPDIcerJVqRhmx9D4') 
 ADMIN_ID = 5312279751  # Your Admin ID
 BOT_USERNAME = 'One_piece_is_real_bot'  # Your Bot Username
-DATABASE_FILE = 'database.json'
-THUMBNAIL_FILE = 'thumbnail.json' # File to store the thumbnail ID
+DATABASE_FILE = 'database.json' # This file will now store content links AND the thumbnail ID
 SHORT_ID_LENGTH = 6
 # Deletion time set to 10 minutes (600 seconds)
 DELETION_TIME_MINUTES = 10
@@ -48,18 +47,22 @@ REQUIRED_CHANNELS = [
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# --- DATABASE AND THUMBNAIL FUNCTIONS ---
+# --- DATABASE FUNCTIONS (Modified for Thumbnail) ---
 
 def load_database():
-    """ Loads database from JSON file. """
+    """ Loads database from JSON file, ensuring the 'thumbnail' key exists. """
     if os.path.exists(DATABASE_FILE):
         try:
             with open(DATABASE_FILE, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+                # Ensure 'thumbnail' key is present even if the file was empty before
+                if 'thumbnail' not in data:
+                    data['thumbnail'] = None 
+                return data
         except json.JSONDecodeError:
             print("⚠️ WARNING: database.json is corrupted or empty. Starting with an empty dict.")
-            return {}
-    return {}
+            return {"thumbnail": None} 
+    return {"thumbnail": None}
 
 
 def save_database(db):
@@ -71,33 +74,26 @@ def save_database(db):
 def generate_short_id(db):
     """ Generates a unique, short Base64-safe ID. """
     chars = string.ascii_letters + string.digits + '-_'
+    # We only check for IDs in the content section, not the 'thumbnail' key
+    content_keys = [k for k in db.keys() if k != 'thumbnail']
+    
     while True:
         short_id = ''.join(
             random.choice(chars) for _ in range(SHORT_ID_LENGTH))
-        if short_id not in db:
+        if short_id not in content_keys:
             return short_id
 
 def save_thumbnail_id(file_id):
-    """ Saves the thumbnail file_id to the thumbnail JSON file. """
-    try:
-        with open(THUMBNAIL_FILE, 'w') as f:
-            json.dump({'thumbnail_file_id': file_id}, f)
-        return True
-    except Exception as e:
-        print(f"🚨 Error saving thumbnail ID: {e}")
-        return False
+    """ Saves the thumbnail file_id directly into the database. """
+    db = load_database()
+    db['thumbnail'] = file_id
+    save_database(db)
 
 def load_thumbnail_id():
-    """ Loads the thumbnail file_id from the thumbnail JSON file. """
-    if os.path.exists(THUMBNAIL_FILE):
-        try:
-            with open(THUMBNAIL_FILE, 'r') as f:
-                data = json.load(f)
-                return data.get('thumbnail_file_id')
-        except (json.JSONDecodeError, FileNotFoundError) as e:
-            print(f"⚠️ Could not load thumbnail ID: {e}")
-            return None
-    return None
+    """ Loads the thumbnail file_id from the database. """
+    db = load_database()
+    return db.get('thumbnail')
+
 
 # --- Deep Link GENERATION FUNCTION ---
 
@@ -109,6 +105,7 @@ def create_deep_link_and_send(chat_id, content_data):
         db = load_database()
         short_id = generate_short_id(db)
 
+        # Content data is stored against the short ID
         db[short_id] = content_data
         save_database(db)
 
@@ -208,7 +205,7 @@ def get_unsubscribed_channels(user_id):
     return unsubscribed_channels
 
 
-# --- send_final_content() (UPDATED to use send_video/send_document with thumbnail) ---
+# --- send_final_content() ---
 
 def send_final_content(chat_id, short_id):
     """
@@ -224,9 +221,10 @@ def send_final_content(chat_id, short_id):
                 "Content data or File ID not found in the database.")
 
         file_id = content_data['file_id']
-        file_type = content_data.get('file_type', 'document') # Default to document for safety
+        file_type = content_data.get('file_type', 'document')
         caption = content_data.get('caption', None)
-        thumbnail_id = content_data.get('thumbnail_file_id', None)
+        # Note: thumbnail_file_id is saved during generation, which is the current thumbnail at that time
+        thumbnail_id = content_data.get('thumbnail_file_id', None) 
 
         bot.send_message(
             chat_id,
@@ -244,7 +242,6 @@ def send_final_content(chat_id, short_id):
 
         # --- SEND FILE AND GET MESSAGE ID (WITH LOGIC) ---
         file_message = None
-        # Use send_video for any file flagged as 'video' (MKV or standard video)
         if file_type == 'video':
             print("Sending as VIDEO (for thumbnail preview)")
             file_message = bot.send_video(
@@ -325,7 +322,7 @@ def handle_start(message):
 
             markup = telebot.types.InlineKeyboardMarkup(row_width=1)
             for channel in unsubscribed_channels:
-                button_label = f"🔗 Join Channel {REQUIRED_CHANNELS.index(channel) + 1}"
+                button_label = f"🔗 Join Channel {REQUIRED_CHANNEL`S.index(channel) + 1}"
                 markup.add(
                     telebot.types.InlineKeyboardButton(button_label,
                                                        url=channel['invite_link']))
@@ -392,17 +389,15 @@ def handle_file_upload(message):
         file_type = None 
 
         if message.video:
-            # Case 1: Telegram detects it as a standard video (MP4, etc.)
             file_id = message.video.file_id
             file_type = 'video'
         elif message.document:
-            # Case 2: Telegram detects it as a document. We check if it's an MKV.
             if message.document.file_name and message.document.file_name.lower().endswith('.mkv'):
                 file_id = message.document.file_id
                 file_type = 'video' # Force MKV to be treated as video for thumbnail preview
             else:
                 file_id = message.document.file_id
-                file_type = 'document' # Treat other documents normally
+                file_type = 'document'
 
         if file_id:
             bot.send_message(
@@ -410,7 +405,6 @@ def handle_file_upload(message):
                 f"✅ File detected as <b>{file_type.upper()}</b>.\n\n"
                 "📝 <b>Caption Required:</b> Please send the text (Caption) you want to attach to this content.",
                 parse_mode='HTML')
-            # Pass both file_id and file_type to the next step
             bot.register_next_step_handler(message, handle_caption_input, file_id, file_type)
 
         else:
@@ -463,21 +457,20 @@ def handle_caption_input(message, file_id, file_type):
 
 # --- NEXT STEP HANDLER (for /setthumbnail) ---
 def handle_set_thumbnail_image(message):
-    """ Saves the received image as the default thumbnail. """
+    """ Saves the received image as the default thumbnail in database.json. """
     try:
         if message.chat.id != ADMIN_ID:
             return
 
         if message.photo:
             thumbnail_file_id = message.photo[-1].file_id
-            if save_thumbnail_id(thumbnail_file_id):
-                bot.send_message(
-                    ADMIN_ID,
-                    "✅ <b>Thumbnail Set Successfully!</b> This image will now be used for all future files.",
-                    parse_mode='HTML')
-                bot.send_photo(ADMIN_ID, thumbnail_file_id, caption="New default thumbnail:")
-            else:
-                bot.send_message(ADMIN_ID, "❌ <b>Error:</b> Could not save the thumbnail. Please check logs.", parse_mode='HTML')
+            save_thumbnail_id(thumbnail_file_id) 
+
+            bot.send_message(
+                ADMIN_ID,
+                "✅ <b>Thumbnail Set Successfully!</b> This image will now be used for all future files.",
+                parse_mode='HTML')
+            bot.send_photo(ADMIN_ID, thumbnail_file_id, caption="New default thumbnail:")
         else:
             bot.send_message(
                 ADMIN_ID,
@@ -503,7 +496,6 @@ def handle_text_messages(message):
             parse_mode='HTML')
     except Exception as e:
         print(f"Error in handle_text_messages: {e}")
-
 # --- CALLBACK HANDLERS (Part 2 starts here) ---
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('check_'))
@@ -521,7 +513,6 @@ def check_callback(call):
 
         if not unsubscribed_channels:
             
-            # This message will be edited and replaced by the file sending message
             bot.edit_message_text(
                 "✅ <b>Verification Successful!</b> Sending your file now... 🚀",
                 chat_id,
@@ -533,7 +524,7 @@ def check_callback(call):
 
         else:
             
-            # --- FIX FOR SYNTAX ERROR IS HERE (Line 530 if counting from the full file start) ---
+            # --- Syntax Error Fixed ---
             text = "❌ <b>Join Incomplete!</b> Please join ALL the required channels below and then press '🔄 Check Again'."
 
             markup = telebot.types.InlineKeyboardMarkup(row_width=1)
@@ -565,16 +556,13 @@ def keep_alive():
     """ 
     Sends an external request every 25 minutes to prevent the inactivity timer.
     """
-    # RENDER_EXTERNAL_URL is set in your Render dashboard Environment Variables
     RENDER_PUBLIC_URL = os.environ.get('RENDER_EXTERNAL_URL', 'https://animes1.onrender.com/')
     PING_INTERVAL_SECONDS = 25 * 60 
 
     while True:
         try:
-            # We ping the Render URL to keep it awake
             requests.get(RENDER_PUBLIC_URL, timeout=10)
         except Exception as e:
-            # If the ping fails, log the error but keep the thread alive
             print(f"⚠️ Keep-Alive Error (Pinging Render URL): {e}. Trying again soon.")
         
         time.sleep(PING_INTERVAL_SECONDS)
@@ -584,7 +572,6 @@ def keep_alive():
 
 @app.route('/', methods=['GET', 'HEAD'])
 def index():
-    # Ensures the root path always returns 200 OK for UptimeRobot
     try:
         return 'Bot is running...', 200
     except Exception as e:
@@ -596,29 +583,24 @@ def run_bot():
     print("Starting Polling for updates...")
     while True: 
         try:
-            # Added long_polling_timeout=30 for better resilience against network issues
             bot.polling(timeout=30, 
                         skip_pending=True,
                         non_stop=True,
                         long_polling_timeout=30) 
         except Exception as e:
-            # Restarts the polling loop on a fatal error, but keeps the Flask server alive.
             print(f"🚨 FATAL POLLING ERROR: {e}. Restarting polling loop in 5 seconds...")
             time.sleep(5) 
 
 if __name__ == '__main__':
     print("✅ Bot Initialization Successful.")
     
-    # 1. Start the Polling Thread (for Telegram updates)
     polling_thread = threading.Thread(target=run_bot)
     polling_thread.daemon = True
     polling_thread.start()
     
-    # 2. Start the Keep-Alive Thread (to prevent sleeping)
     keep_alive_thread = threading.Thread(target=keep_alive)
     keep_alive_thread.daemon = True
     keep_alive_thread.start()
 
-    # 3. Start the Flask Server (This keeps the Render URL alive)
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
         
