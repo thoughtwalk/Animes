@@ -48,7 +48,7 @@ REQUIRED_CHANNELS = [
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# --- DATABASE FUNCTIONS ---
+# --- DATABASE AND THUMBNAIL FUNCTIONS ---
 
 def load_database():
     """ Loads database from JSON file. """
@@ -77,8 +77,6 @@ def generate_short_id(db):
         if short_id not in db:
             return short_id
 
-# --- NEW: THUMBNAIL HELPER FUNCTIONS ---
-
 def save_thumbnail_id(file_id):
     """ Saves the thumbnail file_id to the thumbnail JSON file. """
     try:
@@ -103,7 +101,6 @@ def load_thumbnail_id():
 
 # --- Deep Link GENERATION FUNCTION ---
 
-
 def create_deep_link_and_send(chat_id, content_data):
     """
     Saves the file ID, caption, and thumbnail to the database and generates a short Deep Link.
@@ -125,7 +122,7 @@ def create_deep_link_and_send(chat_id, content_data):
         bot.send_message(
             chat_id,
             f"✅ <b>Deep Link Generated Successfully!</b>\n\n"
-            f"<b>Content Type:</b> <code>Telegram File (MKV/Video)</code>\n"
+            f"<b>Content Type:</b> <code>{content_data.get('file_type', 'document').upper()}</code>\n"
             f"<b>Attached Caption (Preview):</b> \n<code>{content_data.get('caption', 'None')}</code>\n\n"
             f"This link is <b>short</b> and <b>fully functional</b>.\n\n"
             f"Use the button below in your channel post:",
@@ -162,32 +159,25 @@ def schedule_deletion(chat_id, message_id_to_delete, delay_seconds, is_file=Fals
     """
 
     def delete_message_thread():
-        # Wait for the specified time (10 minutes)
         time.sleep(delay_seconds)
         
         try:
-            # Attempt to delete the original message (Warning or File)
             bot.delete_message(chat_id, message_id_to_delete)
             print(f"✅ Successfully deleted message {message_id_to_delete} in chat {chat_id} (is_file: {is_file}).")
             
-            # Send the confirmation message only when deleting the actual file message (is_file=True)
             if is_file:
-                # Confirmation message updated to reflect 10 minutes deletion
                 confirmation_msg = bot.send_message(
                     chat_id,
                     "🗑️ **Content Removed:** The file and its warning message have been automatically deleted from this chat after 10 minutes.",
                     parse_mode='Markdown'
                 )
-                # Schedule the confirmation message itself to be deleted after 5 minutes (300 seconds)
                 threading.Thread(target=schedule_deletion_cleanup, 
                                  args=(chat_id, confirmation_msg.message_id, 5 * 60)).start()
 
         except telebot.apihelper.ApiException as e:
-            # Ignore "Message to delete not found" 
             if 'message to delete not found' not in str(e):
                 print(f"⚠️ Could not delete message {message_id_to_delete} in chat {chat_id}: {e}")
         except Exception as e:
-            # Prevents unexpected errors from crashing the thread
             print(f"🚨 Unexpected error in deletion thread for {message_id_to_delete}: {e}")
 
     deletion_thread = threading.Thread(target=delete_message_thread)
@@ -203,7 +193,6 @@ def get_unsubscribed_channels(user_id):
     unsubscribed_channels = []
     for channel in REQUIRED_CHANNELS:
         try:
-            # Check if user is a member/admin/creator
             member = bot.get_chat_member(channel['id'], user_id)
             if member.status not in ['member', 'administrator', 'creator']:
                 unsubscribed_channels.append(channel)
@@ -211,7 +200,6 @@ def get_unsubscribed_channels(user_id):
             if 'user not found' in str(e) or 'Bad Request: chat not found' in str(e):
                 unsubscribed_channels.append(channel)
             else:
-                 # Log other API errors but proceed
                 print(f"⚠️ Telegram API Error in get_unsubscribed_channels for {channel['name']}: {e}")
                 unsubscribed_channels.append(channel) 
         except Exception:
@@ -219,13 +207,12 @@ def get_unsubscribed_channels(user_id):
     return unsubscribed_channels
 
 
-# --- send_final_content() (UPDATED to include thumbnail) ---
-
+# --- send_final_content() (UPDATED to use send_video/send_document) ---
 
 def send_final_content(chat_id, short_id):
     """
-    Retrieves the content data, sends the file with caption and thumbnail, 
-    and schedules it for deletion. 
+    Retrieves the content data, sends the file with the correct method (video/document),
+    and schedules it for deletion.
     """
     try:
         db = load_database()
@@ -236,8 +223,8 @@ def send_final_content(chat_id, short_id):
                 "Content data or File ID not found in the database.")
 
         file_id = content_data['file_id']
+        file_type = content_data.get('file_type', 'document') # Default to document for old links
         caption = content_data.get('caption', None)
-        # <<< NEW: Get the thumbnail ID from the stored data
         thumbnail_id = content_data.get('thumbnail_file_id', None)
 
         bot.send_message(
@@ -254,15 +241,26 @@ def send_final_content(chat_id, short_id):
             parse_mode='HTML'
         )
 
-        # --- SEND FILE AND GET MESSAGE ID ---
-        # <<< MODIFIED: Added the 'thumbnail' parameter to send_document
-        file_message = bot.send_document(
-            chat_id,
-            file_id,
-            caption=caption,
-            parse_mode='HTML',
-            thumbnail=thumbnail_id
-        )
+        # --- SEND FILE AND GET MESSAGE ID (WITH LOGIC) ---
+        file_message = None
+        if file_type == 'video':
+            print("Sending as VIDEO")
+            file_message = bot.send_video(
+                chat_id,
+                file_id,
+                caption=caption,
+                parse_mode='HTML',
+                thumbnail=thumbnail_id 
+            )
+        else: # Default to sending as a document
+            print("Sending as DOCUMENT")
+            file_message = bot.send_document(
+                chat_id,
+                file_id,
+                caption=caption,
+                parse_mode='HTML',
+                thumbnail=thumbnail_id
+            )
 
         # --- SCHEDULE DELETION ---
         schedule_deletion(chat_id, warning_message.message_id,
@@ -353,13 +351,13 @@ def handle_generate_command(message):
 
         bot.send_message(
             ADMIN_ID,
-            "✅ <b>Deep Link Generation Mode (File):</b> Please send the file (Video, MKV, or any Document) for which you want to generate a <b>Short Deep Link</b>. <i>Note: The caption will automatically be formatted as BOLD.</i>",
+            "✅ <b>Deep Link Generation Mode:</b> Please send the file (Video, MKV, or any Document) for which you want to generate a <b>Short Deep Link</b>. <i>Note: The caption will automatically be formatted as BOLD.</i>",
             parse_mode='HTML')
         bot.register_next_step_handler(message, handle_file_upload)
     except Exception as e:
         print(f"Error in handle_generate_command: {e}")
 
-# --- NEW: ADMIN COMMAND TO SET THE THUMBNAIL ---
+# Admin Command: Set Thumbnail
 @bot.message_handler(commands=['setthumbnail'])
 def handle_set_thumbnail_command(message):
     try:
@@ -377,30 +375,34 @@ def handle_set_thumbnail_command(message):
     except Exception as e:
         print(f"Error in handle_set_thumbnail_command: {e}")
 
-# --- NEXT STEP HANDLERS ---
+# --- NEXT STEP HANDLERS (for /generate) ---
 
 def handle_file_upload(message):
-    """ Captures the file ID and asks for the caption. """
+    """ Captures the file ID and file type, then asks for the caption. """
     try:
         if message.chat.id != ADMIN_ID:
             return
 
         file_id = None
+        file_type = None 
 
-        if message.document:
-            file_id = message.document.file_id
-        elif message.video:
+        if message.video:
             file_id = message.video.file_id
-        
-        # Note: We don't handle message.photo here for deep links
-        # because the primary use case is for documents/videos.
+            file_type = 'video'
+        elif message.document:
+            file_id = message.document.file_id
+            # MKV files are often sent as documents. Check mime_type to be more accurate, 
+            # but generally setting documents to 'document' is safe.
+            file_type = 'document' 
 
         if file_id:
             bot.send_message(
                 ADMIN_ID,
-                "📝 <b>Caption Required:</b> Please send the text (Caption) you want to attach to this content. <i>You can include @usernames, and the entire caption will be automatically made BOLD.</i>",
+                f"✅ File detected as <b>{file_type.upper()}</b>.\n\n"
+                "📝 <b>Caption Required:</b> Please send the text (Caption) you want to attach to this content.",
                 parse_mode='HTML')
-            bot.register_next_step_handler(message, handle_caption_input, file_id)
+            # Pass both file_id and file_type to the next step
+            bot.register_next_step_handler(message, handle_caption_input, file_id, file_type)
 
         else:
             bot.send_message(
@@ -412,10 +414,10 @@ def handle_file_upload(message):
         print(f"Error in handle_file_upload: {e}")
 
 
-def handle_caption_input(message, file_id):
+def handle_caption_input(message, file_id, file_type):
     """ 
-    Captures the caption, makes it BOLD, loads the default thumbnail, 
-    and generates the final deep link. 
+    Captures the caption, makes it BOLD, loads the thumbnail, 
+    and saves all data before generating the link.
     """
     try:
         if message.chat.id != ADMIN_ID:
@@ -428,30 +430,29 @@ def handle_caption_input(message, file_id):
                 ADMIN_ID,
                 "❌ <b>Error:</b> Caption was not detected as text. Please send the caption text again.",
                 parse_mode='HTML')
-            bot.register_next_step_handler(message, handle_caption_input, file_id)
+            bot.register_next_step_handler(message, handle_caption_input, file_id, file_type)
             return
 
         auto_bold_caption = f"<b>{caption_text}</b>"
         
-        # <<< NEW: Load the saved thumbnail ID before creating the link
         thumbnail_id = load_thumbnail_id()
         if thumbnail_id:
             bot.send_message(ADMIN_ID, "<i>Applying saved default thumbnail...</i>", parse_mode='HTML')
         else:
             bot.send_message(ADMIN_ID, "<i>No default thumbnail set. Proceeding without one.</i>", parse_mode='HTML')
 
-
         content_data = {
             'file_id': file_id, 
+            'file_type': file_type, 
             'caption': auto_bold_caption,
-            'thumbnail_file_id': thumbnail_id # <<< NEW: Add thumbnail to the data
+            'thumbnail_file_id': thumbnail_id
         }
 
         create_deep_link_and_send(ADMIN_ID, content_data)
     except Exception as e:
         print(f"Error in handle_caption_input: {e}")
 
-# --- NEW: NEXT STEP HANDLER FOR SETTING THE THUMBNAIL ---
+# --- NEXT STEP HANDLER (for /setthumbnail) ---
 def handle_set_thumbnail_image(message):
     """ Saves the received image as the default thumbnail. """
     try:
@@ -459,7 +460,6 @@ def handle_set_thumbnail_image(message):
             return
 
         if message.photo:
-            # Get the highest resolution photo
             thumbnail_file_id = message.photo[-1].file_id
             if save_thumbnail_id(thumbnail_file_id):
                 bot.send_message(
@@ -474,18 +474,16 @@ def handle_set_thumbnail_image(message):
                 ADMIN_ID,
                 "❌ <b>Error:</b> That was not an image. Please send a photo.",
                 parse_mode='HTML')
-            # Ask again
             bot.register_next_step_handler(message, handle_set_thumbnail_image)
     except Exception as e:
         print(f"Error in handle_set_thumbnail_image: {e}")
 
-# --- GENERAL TEXT HANDLER ---
 
+# --- GENERAL TEXT HANDLER ---
 
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def handle_text_messages(message):
     try:
-        # Ignore commands, let their handlers take care of them
         if message.text.startswith('/'):
             return
 
@@ -497,9 +495,7 @@ def handle_text_messages(message):
     except Exception as e:
         print(f"Error in handle_text_messages: {e}")
 
-
-# --- CALLBACK HANDLERS ---
-
+# --- CALLBACK HANDLERS (Part 2 starts here) ---
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('check_'))
 def check_callback(call):
@@ -527,7 +523,6 @@ def check_callback(call):
 
         else:
             
-            # THIS IS THE LINE THAT NEEDS TO BE FIXED
             text = "❌ <b>Join Incomplete!</b> Please join ALL the required channels below and then press '🔄 Check Again'."
 
             markup = telebot.types.InlineKeyboardMarkup(row_width=1)
@@ -551,7 +546,6 @@ def check_callback(call):
             )
     except Exception as e:
         print(f"Error in check_callback: {e}")
-        
 
 
 # --- KEEP-ALIVE MECHANISM ---
@@ -560,27 +554,22 @@ def keep_alive():
     """ 
     Sends an external request every 25 minutes to prevent the inactivity timer.
     """
-    # NOTE: RENDER_EXTERNAL_URL is set in your Render dashboard Environment Variables
     RENDER_PUBLIC_URL = os.environ.get('RENDER_EXTERNAL_URL', 'https://animes1.onrender.com/')
     PING_INTERVAL_SECONDS = 25 * 60 
 
     while True:
         try:
-            # We ping the Render URL to keep it awake
             requests.get(RENDER_PUBLIC_URL, timeout=10)
-            # print(f"🚀 Keep-Alive Ping Sent to {RENDER_PUBLIC_URL}. Timer reset.") # Commented out for cleaner logs
         except Exception as e:
-            # If the ping fails, log the error but keep the thread alive
             print(f"⚠️ Keep-Alive Error (Pinging Render URL): {e}. Trying again soon.")
         
         time.sleep(PING_INTERVAL_SECONDS)
 
-# --- START SERVER AND POLLING (FIXED Indentation) ---
+# --- START SERVER AND POLLING ---
 
 
 @app.route('/', methods=['GET', 'HEAD'])
 def index():
-    # Ensures the root path always returns 200 OK for UptimeRobot
     try:
         return 'Bot is running...', 200
     except Exception as e:
@@ -592,29 +581,24 @@ def run_bot():
     print("Starting Polling for updates...")
     while True: 
         try:
-            # Added long_polling_timeout=30 for better resilience against network issues
             bot.polling(timeout=30, 
                         skip_pending=True,
                         non_stop=True,
                         long_polling_timeout=30) 
         except Exception as e:
-            # Restarts the polling loop on a fatal error, but keeps the Flask server alive.
             print(f"🚨 FATAL POLLING ERROR: {e}. Restarting polling loop in 5 seconds...")
             time.sleep(5) 
 
 if __name__ == '__main__':
     print("✅ Bot Initialization Successful.")
     
-    # 1. Start the Polling Thread (for Telegram updates)
     polling_thread = threading.Thread(target=run_bot)
     polling_thread.daemon = True
     polling_thread.start()
     
-    # 2. Start the Keep-Alive Thread (to prevent sleeping)
     keep_alive_thread = threading.Thread(target=keep_alive)
     keep_alive_thread.daemon = True
     keep_alive_thread.start()
 
-    # 3. Start the Flask Server (This keeps the Render URL alive)
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
