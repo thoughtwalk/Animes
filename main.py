@@ -15,6 +15,7 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN', '7902930015:AAEnGzQaZHdRcmuAxWIPDIcerJVq
 ADMIN_ID = 5312279751  # Your Admin ID
 BOT_USERNAME = 'One_piece_is_real_bot'  # Your Bot Username
 DATABASE_FILE = 'database.json'
+THUMBNAIL_FILE = 'thumbnail.json' # <<< NEW: File to store the thumbnail ID
 SHORT_ID_LENGTH = 6
 # >>> Deletion time set to 10 minutes (600 seconds)
 DELETION_TIME_MINUTES = 10
@@ -76,13 +77,36 @@ def generate_short_id(db):
         if short_id not in db:
             return short_id
 
+# --- NEW: THUMBNAIL HELPER FUNCTIONS ---
+
+def save_thumbnail_id(file_id):
+    """ Saves the thumbnail file_id to the thumbnail JSON file. """
+    try:
+        with open(THUMBNAIL_FILE, 'w') as f:
+            json.dump({'thumbnail_file_id': file_id}, f)
+        return True
+    except Exception as e:
+        print(f"🚨 Error saving thumbnail ID: {e}")
+        return False
+
+def load_thumbnail_id():
+    """ Loads the thumbnail file_id from the thumbnail JSON file. """
+    if os.path.exists(THUMBNAIL_FILE):
+        try:
+            with open(THUMBNAIL_FILE, 'r') as f:
+                data = json.load(f)
+                return data.get('thumbnail_file_id')
+        except (json.JSONDecodeError, FileNotFoundError) as e:
+            print(f"⚠️ Could not load thumbnail ID: {e}")
+            return None
+    return None
 
 # --- Deep Link GENERATION FUNCTION ---
 
 
 def create_deep_link_and_send(chat_id, content_data):
     """
-    Saves the file ID and caption to the database and generates a short Deep Link.
+    Saves the file ID, caption, and thumbnail to the database and generates a short Deep Link.
     """
     try:
         db = load_database()
@@ -195,12 +219,12 @@ def get_unsubscribed_channels(user_id):
     return unsubscribed_channels
 
 
-# --- send_final_content() (UPDATED Warning Message) ---
+# --- send_final_content() (UPDATED to include thumbnail) ---
 
 
 def send_final_content(chat_id, short_id):
     """
-    Retrieves the content data and sends the file with the associated caption 
+    Retrieves the content data, sends the file with caption and thumbnail, 
     and schedules it for deletion. 
     """
     try:
@@ -212,9 +236,9 @@ def send_final_content(chat_id, short_id):
                 "Content data or File ID not found in the database.")
 
         file_id = content_data['file_id']
-        caption = content_data.get(
-            'caption',
-            None)  
+        caption = content_data.get('caption', None)
+        # <<< NEW: Get the thumbnail ID from the stored data
+        thumbnail_id = content_data.get('thumbnail_file_id', None)
 
         bot.send_message(
             chat_id,
@@ -222,7 +246,6 @@ def send_final_content(chat_id, short_id):
             parse_mode='HTML')
 
         # --- WARNING MESSAGE ---
-        # Warning message updated to 10 minutes and made entirely BOLD
         warning_message = bot.send_message(
             chat_id,
             "<b>🚨 SECURITY ALERT! 🚨\n\n"
@@ -232,26 +255,23 @@ def send_final_content(chat_id, short_id):
         )
 
         # --- SEND FILE AND GET MESSAGE ID ---
+        # <<< MODIFIED: Added the 'thumbnail' parameter to send_document
         file_message = bot.send_document(
             chat_id,
             file_id,
-            caption=
-            caption,  
-            parse_mode='HTML'
+            caption=caption,
+            parse_mode='HTML',
+            thumbnail=thumbnail_id
         )
 
         # --- SCHEDULE DELETION ---
-        # 1. Schedule the Warning message for deletion (is_file=False)
         schedule_deletion(chat_id, warning_message.message_id,
                           DELETION_TIME_SECONDS, is_file=False)
                           
-        # 2. Schedule the actual File message for deletion (is_file=True)
-        #    This is the message whose deletion will trigger the final confirmation.
         schedule_deletion(chat_id, file_message.message_id,
                           DELETION_TIME_SECONDS, is_file=True)
 
     except Exception as e:
-        # Prevents bot from crashing on invalid/expired file_id
         print(f"Error sending content or invalid link: {e}")
         bot.send_message(
             chat_id,
@@ -339,9 +359,25 @@ def handle_generate_command(message):
     except Exception as e:
         print(f"Error in handle_generate_command: {e}")
 
+# --- NEW: ADMIN COMMAND TO SET THE THUMBNAIL ---
+@bot.message_handler(commands=['setthumbnail'])
+def handle_set_thumbnail_command(message):
+    try:
+        if message.chat.id != ADMIN_ID:
+            return bot.send_message(
+                message.chat.id,
+                "❌ <b>Error:</b> This command is for the <b>Admin Only</b>.",
+                parse_mode='HTML')
+
+        bot.send_message(
+            ADMIN_ID,
+            "🖼️ <b>Set Default Thumbnail:</b> Please send the image you want to use as the default thumbnail for all future generated links.",
+            parse_mode='HTML')
+        bot.register_next_step_handler(message, handle_set_thumbnail_image)
+    except Exception as e:
+        print(f"Error in handle_set_thumbnail_command: {e}")
 
 # --- NEXT STEP HANDLERS ---
-
 
 def handle_file_upload(message):
     """ Captures the file ID and asks for the caption. """
@@ -355,8 +391,9 @@ def handle_file_upload(message):
             file_id = message.document.file_id
         elif message.video:
             file_id = message.video.file_id
-        elif message.photo:
-            file_id = message.photo[-1].file_id
+        
+        # Note: We don't handle message.photo here for deep links
+        # because the primary use case is for documents/videos.
 
         if file_id:
             bot.send_message(
@@ -376,7 +413,10 @@ def handle_file_upload(message):
 
 
 def handle_caption_input(message, file_id):
-    """ Captures the caption, automatically makes it BOLD (using HTML <b>), and generates the final deep link. """
+    """ 
+    Captures the caption, makes it BOLD, loads the default thumbnail, 
+    and generates the final deep link. 
+    """
     try:
         if message.chat.id != ADMIN_ID:
             return
@@ -392,13 +432,52 @@ def handle_caption_input(message, file_id):
             return
 
         auto_bold_caption = f"<b>{caption_text}</b>"
+        
+        # <<< NEW: Load the saved thumbnail ID before creating the link
+        thumbnail_id = load_thumbnail_id()
+        if thumbnail_id:
+            bot.send_message(ADMIN_ID, "<i>Applying saved default thumbnail...</i>", parse_mode='HTML')
+        else:
+            bot.send_message(ADMIN_ID, "<i>No default thumbnail set. Proceeding without one.</i>", parse_mode='HTML')
 
-        content_data = {'file_id': file_id, 'caption': auto_bold_caption}
+
+        content_data = {
+            'file_id': file_id, 
+            'caption': auto_bold_caption,
+            'thumbnail_file_id': thumbnail_id # <<< NEW: Add thumbnail to the data
+        }
 
         create_deep_link_and_send(ADMIN_ID, content_data)
     except Exception as e:
         print(f"Error in handle_caption_input: {e}")
 
+# --- NEW: NEXT STEP HANDLER FOR SETTING THE THUMBNAIL ---
+def handle_set_thumbnail_image(message):
+    """ Saves the received image as the default thumbnail. """
+    try:
+        if message.chat.id != ADMIN_ID:
+            return
+
+        if message.photo:
+            # Get the highest resolution photo
+            thumbnail_file_id = message.photo[-1].file_id
+            if save_thumbnail_id(thumbnail_file_id):
+                bot.send_message(
+                    ADMIN_ID,
+                    "✅ <b>Thumbnail Set Successfully!</b> This image will now be used for all future files.",
+                    parse_mode='HTML')
+                bot.send_photo(ADMIN_ID, thumbnail_file_id, caption="New default thumbnail:")
+            else:
+                bot.send_message(ADMIN_ID, "❌ <b>Error:</b> Could not save the thumbnail. Please check logs.", parse_mode='HTML')
+        else:
+            bot.send_message(
+                ADMIN_ID,
+                "❌ <b>Error:</b> That was not an image. Please send a photo.",
+                parse_mode='HTML')
+            # Ask again
+            bot.register_next_step_handler(message, handle_set_thumbnail_image)
+    except Exception as e:
+        print(f"Error in handle_set_thumbnail_image: {e}")
 
 # --- GENERAL TEXT HANDLER ---
 
@@ -406,9 +485,11 @@ def handle_caption_input(message, file_id):
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def handle_text_messages(message):
     try:
-        chat_id = message.chat.id
-        # text = message.text.strip() # Not used in this version
+        # Ignore commands, let their handlers take care of them
+        if message.text.startswith('/'):
+            return
 
+        chat_id = message.chat.id
         bot.send_message(
             chat_id,
             "🤖 <b>I'm an automated bot.</b> Please use a Deep Link from one of our channels or send /start to see my welcome message. ✨",
@@ -446,6 +527,9 @@ def check_callback(call):
 
         else:
             
+            text = "❌ <b>Join Incomplete!</b> Please
+            # --- Code continues from the 'else' block in check_callback ---
+
             text = "❌ <b>Join Incomplete!</b> Please join ALL the required channels below and then press '🔄 Check Again'."
 
             markup = telebot.types.InlineKeyboardMarkup(row_width=1)
@@ -534,4 +618,4 @@ if __name__ == '__main__':
 
     # 3. Start the Flask Server (This keeps the Render URL alive)
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
-    
+
