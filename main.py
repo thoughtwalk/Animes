@@ -15,9 +15,9 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN', '7902930015:AAEnGzQaZHdRcmuAxWIPDIcerJVq
 ADMIN_ID = 5312279751  # Your Admin ID
 BOT_USERNAME = 'One_piece_is_real_bot'  # Your Bot Username
 DATABASE_FILE = 'database.json'
-THUMBNAIL_FILE = 'thumbnail.json' # <<< NEW: File to store the thumbnail ID
+THUMBNAIL_FILE = 'thumbnail.json' # File to store the thumbnail ID
 SHORT_ID_LENGTH = 6
-# >>> Deletion time set to 10 minutes (600 seconds)
+# Deletion time set to 10 minutes (600 seconds)
 DELETION_TIME_MINUTES = 10
 DELETION_TIME_SECONDS = DELETION_TIME_MINUTES * 60
 
@@ -171,6 +171,7 @@ def schedule_deletion(chat_id, message_id_to_delete, delay_seconds, is_file=Fals
                     "🗑️ **Content Removed:** The file and its warning message have been automatically deleted from this chat after 10 minutes.",
                     parse_mode='Markdown'
                 )
+                # Cleanup the confirmation message 5 minutes after file deletion
                 threading.Thread(target=schedule_deletion_cleanup, 
                                  args=(chat_id, confirmation_msg.message_id, 5 * 60)).start()
 
@@ -207,7 +208,7 @@ def get_unsubscribed_channels(user_id):
     return unsubscribed_channels
 
 
-# --- send_final_content() (UPDATED to use send_video/send_document) ---
+# --- send_final_content() (UPDATED to use send_video/send_document with thumbnail) ---
 
 def send_final_content(chat_id, short_id):
     """
@@ -223,7 +224,7 @@ def send_final_content(chat_id, short_id):
                 "Content data or File ID not found in the database.")
 
         file_id = content_data['file_id']
-        file_type = content_data.get('file_type', 'document') # Default to document for old links
+        file_type = content_data.get('file_type', 'document') # Default to document for safety
         caption = content_data.get('caption', None)
         thumbnail_id = content_data.get('thumbnail_file_id', None)
 
@@ -243,8 +244,9 @@ def send_final_content(chat_id, short_id):
 
         # --- SEND FILE AND GET MESSAGE ID (WITH LOGIC) ---
         file_message = None
+        # Use send_video for any file flagged as 'video' (MKV or standard video)
         if file_type == 'video':
-            print("Sending as VIDEO")
+            print("Sending as VIDEO (for thumbnail preview)")
             file_message = bot.send_video(
                 chat_id,
                 file_id,
@@ -252,8 +254,8 @@ def send_final_content(chat_id, short_id):
                 parse_mode='HTML',
                 thumbnail=thumbnail_id 
             )
-        else: # Default to sending as a document
-            print("Sending as DOCUMENT")
+        else: # Use send_document for all other types
+            print("Sending as DOCUMENT (standard file)")
             file_message = bot.send_document(
                 chat_id,
                 file_id,
@@ -378,7 +380,10 @@ def handle_set_thumbnail_command(message):
 # --- NEXT STEP HANDLERS (for /generate) ---
 
 def handle_file_upload(message):
-    """ Captures the file ID and file type, then asks for the caption. """
+    """ 
+    Captures the file ID and file type (detecting MKV as VIDEO), 
+    then asks for the caption. 
+    """
     try:
         if message.chat.id != ADMIN_ID:
             return
@@ -387,13 +392,17 @@ def handle_file_upload(message):
         file_type = None 
 
         if message.video:
+            # Case 1: Telegram detects it as a standard video (MP4, etc.)
             file_id = message.video.file_id
             file_type = 'video'
         elif message.document:
-            file_id = message.document.file_id
-            # MKV files are often sent as documents. Check mime_type to be more accurate, 
-            # but generally setting documents to 'document' is safe.
-            file_type = 'document' 
+            # Case 2: Telegram detects it as a document. We check if it's an MKV.
+            if message.document.file_name and message.document.file_name.lower().endswith('.mkv'):
+                file_id = message.document.file_id
+                file_type = 'video' # Force MKV to be treated as video for thumbnail preview
+            else:
+                file_id = message.document.file_id
+                file_type = 'document' # Treat other documents normally
 
         if file_id:
             bot.send_message(
@@ -512,6 +521,7 @@ def check_callback(call):
 
         if not unsubscribed_channels:
             
+            # This message will be edited and replaced by the file sending message
             bot.edit_message_text(
                 "✅ <b>Verification Successful!</b> Sending your file now... 🚀",
                 chat_id,
@@ -523,6 +533,7 @@ def check_callback(call):
 
         else:
             
+            # --- FIX FOR SYNTAX ERROR IS HERE (Line 530 if counting from the full file start) ---
             text = "❌ <b>Join Incomplete!</b> Please join ALL the required channels below and then press '🔄 Check Again'."
 
             markup = telebot.types.InlineKeyboardMarkup(row_width=1)
@@ -554,13 +565,16 @@ def keep_alive():
     """ 
     Sends an external request every 25 minutes to prevent the inactivity timer.
     """
+    # RENDER_EXTERNAL_URL is set in your Render dashboard Environment Variables
     RENDER_PUBLIC_URL = os.environ.get('RENDER_EXTERNAL_URL', 'https://animes1.onrender.com/')
     PING_INTERVAL_SECONDS = 25 * 60 
 
     while True:
         try:
+            # We ping the Render URL to keep it awake
             requests.get(RENDER_PUBLIC_URL, timeout=10)
         except Exception as e:
+            # If the ping fails, log the error but keep the thread alive
             print(f"⚠️ Keep-Alive Error (Pinging Render URL): {e}. Trying again soon.")
         
         time.sleep(PING_INTERVAL_SECONDS)
@@ -570,6 +584,7 @@ def keep_alive():
 
 @app.route('/', methods=['GET', 'HEAD'])
 def index():
+    # Ensures the root path always returns 200 OK for UptimeRobot
     try:
         return 'Bot is running...', 200
     except Exception as e:
@@ -581,24 +596,29 @@ def run_bot():
     print("Starting Polling for updates...")
     while True: 
         try:
+            # Added long_polling_timeout=30 for better resilience against network issues
             bot.polling(timeout=30, 
                         skip_pending=True,
                         non_stop=True,
                         long_polling_timeout=30) 
         except Exception as e:
+            # Restarts the polling loop on a fatal error, but keeps the Flask server alive.
             print(f"🚨 FATAL POLLING ERROR: {e}. Restarting polling loop in 5 seconds...")
             time.sleep(5) 
 
 if __name__ == '__main__':
     print("✅ Bot Initialization Successful.")
     
+    # 1. Start the Polling Thread (for Telegram updates)
     polling_thread = threading.Thread(target=run_bot)
     polling_thread.daemon = True
     polling_thread.start()
     
+    # 2. Start the Keep-Alive Thread (to prevent sleeping)
     keep_alive_thread = threading.Thread(target=keep_alive)
     keep_alive_thread.daemon = True
     keep_alive_thread.start()
 
+    # 3. Start the Flask Server (This keeps the Render URL alive)
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
-
+        
