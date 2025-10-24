@@ -322,7 +322,8 @@ def handle_start(message):
 
             markup = telebot.types.InlineKeyboardMarkup(row_width=1)
             for channel in unsubscribed_channels:
-                button_label = f"🔗 Join Channel {REQUIRED_CHANNEL`S.index(channel) + 1}"
+                # --- SYNTAX ERROR FIX IS HERE (Line 325) ---
+                button_label = f"🔗 Join Channel {REQUIRED_CHANNELS.index(channel) + 1}"
                 markup.add(
                     telebot.types.InlineKeyboardButton(button_label,
                                                        url=channel['invite_link']))
@@ -524,7 +525,6 @@ def check_callback(call):
 
         else:
             
-            # --- Syntax Error Fixed ---
             text = "❌ <b>Join Incomplete!</b> Please join ALL the required channels below and then press '🔄 Check Again'."
 
             markup = telebot.types.InlineKeyboardMarkup(row_width=1)
