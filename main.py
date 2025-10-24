@@ -527,9 +527,7 @@ def check_callback(call):
 
         else:
             
-            text = "❌ <b>Join Incomplete!</b> Please
-            # --- Code continues from the 'else' block in check_callback ---
-
+            # THIS IS THE LINE THAT NEEDS TO BE FIXED
             text = "❌ <b>Join Incomplete!</b> Please join ALL the required channels below and then press '🔄 Check Again'."
 
             markup = telebot.types.InlineKeyboardMarkup(row_width=1)
@@ -553,6 +551,7 @@ def check_callback(call):
             )
     except Exception as e:
         print(f"Error in check_callback: {e}")
+        
 
 
 # --- KEEP-ALIVE MECHANISM ---
