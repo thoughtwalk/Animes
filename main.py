@@ -223,7 +223,7 @@ def send_final_content(chat_id, short_id):
         file_id = content_data['file_id']
         file_type = content_data.get('file_type', 'document')
         caption = content_data.get('caption', None)
-        # Note: thumbnail_file_id is saved during generation, which is the current thumbnail at that time
+        # Note: thumbnail_file_id is saved during generation, which is the conditional thumbnail
         thumbnail_id = content_data.get('thumbnail_file_id', None) 
 
         bot.send_message(
@@ -322,7 +322,6 @@ def handle_start(message):
 
             markup = telebot.types.InlineKeyboardMarkup(row_width=1)
             for channel in unsubscribed_channels:
-                # --- SYNTAX ERROR FIX IS HERE (Line 325) ---
                 button_label = f"🔗 Join Channel {REQUIRED_CHANNELS.index(channel) + 1}"
                 markup.add(
                     telebot.types.InlineKeyboardButton(button_label,
@@ -337,9 +336,7 @@ def handle_start(message):
                             parse_mode='HTML')
     except Exception as e:
         print(f"Error in handle_start: {e}")
-
-
-# Admin Command: Deep Link Generation Mode
+        # Admin Command: Deep Link Generation Mode
 @bot.message_handler(commands=['generate'])
 def handle_generate_command(message):
     try:
@@ -380,33 +377,43 @@ def handle_set_thumbnail_command(message):
 def handle_file_upload(message):
     """ 
     Captures the file ID and file type (detecting MKV as VIDEO), 
-    then asks for the caption. 
+    checks for an existing thumbnail in the file metadata, then asks for the caption. 
     """
     try:
         if message.chat.id != ADMIN_ID:
             return
 
         file_id = None
-        file_type = None 
+        file_type = None
+        file_has_thumbnail = False # New flag to check existing thumbnail
 
         if message.video:
             file_id = message.video.file_id
             file_type = 'video'
+            if message.video.thumbnail:
+                file_has_thumbnail = True
         elif message.document:
             if message.document.file_name and message.document.file_name.lower().endswith('.mkv'):
                 file_id = message.document.file_id
-                file_type = 'video' # Force MKV to be treated as video for thumbnail preview
+                file_type = 'video' # Treat MKV as video
+                if message.document.thumbnail:
+                    file_has_thumbnail = True
             else:
                 file_id = message.document.file_id
                 file_type = 'document'
+                if message.document.thumbnail:
+                    file_has_thumbnail = True
 
         if file_id:
+            # Pass the new flag to the next step
             bot.send_message(
                 ADMIN_ID,
                 f"✅ File detected as <b>{file_type.upper()}</b>.\n\n"
+                f"🖼️ File has existing thumbnail: <b>{'Yes' if file_has_thumbnail else 'No'}</b>.\n\n"
                 "📝 <b>Caption Required:</b> Please send the text (Caption) you want to attach to this content.",
                 parse_mode='HTML')
-            bot.register_next_step_handler(message, handle_caption_input, file_id, file_type)
+            # Pass the new flag here
+            bot.register_next_step_handler(message, handle_caption_input, file_id, file_type, file_has_thumbnail)
 
         else:
             bot.send_message(
@@ -418,10 +425,11 @@ def handle_file_upload(message):
         print(f"Error in handle_file_upload: {e}")
 
 
-def handle_caption_input(message, file_id, file_type):
+def handle_caption_input(message, file_id, file_type, file_has_thumbnail):
     """ 
     Captures the caption, makes it BOLD, loads the thumbnail, 
-    and saves all data before generating the link.
+    and saves all data before generating the link. Applies default thumbnail 
+    ONLY IF the file has no existing one.
     """
     try:
         if message.chat.id != ADMIN_ID:
@@ -434,22 +442,34 @@ def handle_caption_input(message, file_id, file_type):
                 ADMIN_ID,
                 "❌ <b>Error:</b> Caption was not detected as text. Please send the caption text again.",
                 parse_mode='HTML')
-            bot.register_next_step_handler(message, handle_caption_input, file_id, file_type)
+            # Note: We must pass file_has_thumbnail back for re-try
+            bot.register_next_step_handler(message, handle_caption_input, file_id, file_type, file_has_thumbnail)
             return
 
         auto_bold_caption = f"<b>{caption_text}</b>"
         
-        thumbnail_id = load_thumbnail_id()
-        if thumbnail_id:
+        thumbnail_id_to_use = None
+        default_thumbnail_id = load_thumbnail_id()
+
+        if file_has_thumbnail:
+            # Case 1: File already has a thumbnail (e.g., from forwarding/metadata)
+            bot.send_message(ADMIN_ID, "<i>File already contains a thumbnail. Default thumbnail will be ignored.</i>", parse_mode='HTML')
+            # We send None for the thumbnail parameter, relying on the file's embedded one.
+            thumbnail_id_to_use = None 
+        elif default_thumbnail_id:
+            # Case 2: File has NO thumbnail, and a default one is set
             bot.send_message(ADMIN_ID, "<i>Applying saved default thumbnail...</i>", parse_mode='HTML')
+            thumbnail_id_to_use = default_thumbnail_id
         else:
+            # Case 3: Neither file has a thumbnail nor is a default one set
             bot.send_message(ADMIN_ID, "<i>No default thumbnail set. Proceeding without one.</i>", parse_mode='HTML')
+            thumbnail_id_to_use = None
 
         content_data = {
             'file_id': file_id, 
             'file_type': file_type, 
             'caption': auto_bold_caption,
-            'thumbnail_file_id': thumbnail_id
+            'thumbnail_file_id': thumbnail_id_to_use # Use the conditional ID
         }
 
         create_deep_link_and_send(ADMIN_ID, content_data)
@@ -469,7 +489,7 @@ def handle_set_thumbnail_image(message):
 
             bot.send_message(
                 ADMIN_ID,
-                "✅ <b>Thumbnail Set Successfully!</b> This image will now be used for all future files.",
+                "✅ <b>Thumbnail Set Successfully!</b> This image will now be used for all future files that do not have an embedded thumbnail.",
                 parse_mode='HTML')
             bot.send_photo(ADMIN_ID, thumbnail_file_id, caption="New default thumbnail:")
         else:
@@ -497,7 +517,9 @@ def handle_text_messages(message):
             parse_mode='HTML')
     except Exception as e:
         print(f"Error in handle_text_messages: {e}")
-# --- CALLBACK HANDLERS (Part 2 starts here) ---
+
+
+# --- CALLBACK HANDLERS ---
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('check_'))
 def check_callback(call):
